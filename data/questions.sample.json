@@ -1,0 +1,41 @@
+[
+  {
+    "source_row_number": 1,
+    "external_id": "PL010-0001",
+    "category": "AIR_LAW",
+    "question_text": "Kto jest odpowiedzialny za bezpieczne wykonanie lotu statku powietrznego?",
+    "correct_answer_key": "A",
+    "answers": [
+      { "key": "A", "text": "Dowódca statku powietrznego.", "is_correct": true },
+      { "key": "B", "text": "Kontroler ruchu lotniczego.", "is_correct": false },
+      { "key": "C", "text": "Właściciel lotniska.", "is_correct": false },
+      { "key": "D", "text": "Mechanik obsługi technicznej.", "is_correct": false }
+    ]
+  },
+  {
+    "source_row_number": 2,
+    "external_id": "PL050-0002",
+    "category": "METEOROLOGY",
+    "question_text": "Które zjawisko najczęściej ogranicza widzialność przy ziemi?",
+    "correct_answer_key": "A",
+    "answers": [
+      { "key": "A", "text": "Mgła.", "is_correct": true },
+      { "key": "B", "text": "Bryza morska.", "is_correct": false },
+      { "key": "C", "text": "Turbulencja mechaniczna.", "is_correct": false },
+      { "key": "D", "text": "Inwersja temperatury na dużej wysokości.", "is_correct": false }
+    ]
+  },
+  {
+    "source_row_number": 3,
+    "external_id": "PL060-0003",
+    "category": "NAVIGATION",
+    "question_text": "Co oznacza kurs magnetyczny?",
+    "correct_answer_key": "A",
+    "answers": [
+      { "key": "A", "text": "Kąt między północą magnetyczną a osią podłużną statku powietrznego.", "is_correct": true },
+      { "key": "B", "text": "Kąt między północą geograficzną a linią drogi nad ziemią.", "is_correct": false },
+      { "key": "C", "text": "Odległość między dwoma punktami na mapie.", "is_correct": false },
+      { "key": "D", "text": "Prędkość względem ziemi skorygowana o wiatr.", "is_correct": false }
+    ]
+  }
+]
