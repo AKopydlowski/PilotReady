@@ -11,6 +11,8 @@ python -m pip install -r requirements.txt
 python scripts/parse_ppla_pdf.py --input ppla.pdf --output data/questions.json --pretty
 ```
 
+The parser combines table extraction, geometry-based row reconstruction, and a regex text fallback for IDs such as `PL010-0003` or `PL 010-0003`. It prints an audit log with total scanned lines/rows, parsed question count, duplicates, missing detected IDs, and issue pages. By default it refuses to write `questions.json` if a detected question ID cannot be reconstructed; use `--allow-audit-gaps` only for manual debugging.
+
 The parser extracts the tabular columns `L.p.`, `NUMER`, `PYTANIE`, `ODP1`, `ODP2`, `ODP3`, and `ODP4` into a stable JSON structure. Because the source stores the correct answer in `ODP1`, generated records keep `correct_answer_key` as `A`; frontend and mobile API responses must shuffle answers at delivery time without changing the persisted source truth.
 
 Use `data/questions.sample.json` for lightweight frontend/API development and tests until the full generated `data/questions.json` is needed for database seeding.
