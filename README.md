@@ -185,13 +185,10 @@ W repo leży tylko `.env.example` jako szablon.
 
 ---
 
-## 🗺️ Co dalej (pomysły na rozwój)
+## 🗺️ Co dalej
 
-- Konta użytkowników i logowanie (model już czeka w bazie; teraz działa
-  tryb demo z automatycznie tworzonym użytkownikiem).
-- Historia podejść do egzaminu i statystyki słabych punktów w czasie.
-- Spaced repetition z prawdziwym harmonogramem powtórek (terminy „due").
-- Wersja mobilna / PWA do nauki w terenie.
+- 📱 **Aplikacja mobilna** — wkrótce.
+- 👤 **Konta użytkowników i logowanie** — wkrótce.
 
 ---
 
