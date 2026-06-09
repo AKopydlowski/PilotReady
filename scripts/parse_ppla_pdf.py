@@ -473,26 +473,6 @@ def extract_pdfminer_geometry_rows(lines: Sequence[PdfTextLine], page_width: flo
                         columns[3].append(split_parts[1])
                         continue
                 columns[column].append(line.text)
-
-        # Repair pdfminer answer-column merges: pdfminer occasionally emits ODP(n)
-        # and ODP(n+1) as a single LTTextLine separated by a wide internal gap,
-        # which leaves the neighbour column empty (e.g. ODP1 holds "okresowy.  na
-        # stałe." while ODP2 is blank). When an answer column is non-empty, its
-        # next neighbour is empty, and one of its lines carries a 2+ space gap,
-        # split that line and push the tail into the empty neighbour so all four
-        # ODP cells stay aligned to their own answer.
-        for answer_column in (3, 4, 5):
-            if not columns[answer_column] or columns[answer_column + 1]:
-                continue
-            for line_index, value in enumerate(columns[answer_column]):
-                if not re.search(r"\S\s{2,}\S", value):
-                    continue
-                head, tail = re.split(r"\s{2,}", value, maxsplit=1)
-                if head.strip() and tail.strip():
-                    columns[answer_column][line_index] = head.strip()
-                    columns[answer_column + 1].append(tail.strip())
-                    break
-
         cells = [clean_cell("\n".join(values)) for values in columns]
         if cells[1] and cells[2] and cells[3]:
             rows.append(ExtractedRow(cells, page_number, "pdfminer-geometry"))
@@ -516,6 +496,105 @@ def import_pdfplumber():
             "Missing dependency 'pdfplumber'. Install with: python -m pip install -r requirements.txt"
         ) from exc
     return pdfplumber
+
+
+# The PPL(A) table is drawn with thin rectangles (not line objects). Their
+# vertical edges give an exact, page-stable column grid; assigning each *word*
+# to a column by this grid avoids pdfminer's habit of merging two answer cells
+# into one line (which used to bleed answers between ODP columns).
+RECTGRID_CANON = (71.0, 103.0, 213.0, 313.0, 445.0, 554.0, 662.0, 771.0)
+RECTGRID_HEADER_TOKENS = {"lp", "numer", "pytanie", "odp1", "odp2", "odp3", "odp4"}
+RECTGRID_PAGE_GAP = 20.0
+
+
+def _rectgrid_column(x: float, grid: Sequence[float]) -> int:
+    for index in range(7):
+        if grid[index] <= x < grid[index + 1]:
+            return index
+    return -1
+
+
+def _rectgrid_page_grid(page: object) -> list[float]:
+    """Derive the 8 column edges from the page's rectangles, else fall back."""
+
+    rects = getattr(page, "rects", []) or []
+    edges = sorted({round(r["x0"]) for r in rects} | {round(r["x1"]) for r in rects})
+    collapsed: list[float] = []
+    for edge in edges:
+        if not collapsed or edge - collapsed[-1] > 3:
+            collapsed.append(float(edge))
+    return collapsed if len(collapsed) == 8 else list(RECTGRID_CANON)
+
+
+def _rectgrid_cluster_rows(items: list[tuple[float, float, str]], tol: float = 4.0) -> list[list[tuple[float, float, str]]]:
+    rows: list[list[tuple[float, float, str]]] = []
+    for item in sorted(items, key=lambda t: t[0]):
+        if rows and abs(item[0] - rows[-1][-1][0]) <= tol:
+            rows[-1].append(item)
+        else:
+            rows.append([item])
+    return rows
+
+
+def extract_rectgrid_rows(pdf_path: Path, stats: ParseStats) -> list[ExtractedRow]:
+    """Primary extraction: word-level column assignment via the drawn rectangle
+    grid, with rows reconstructed across page breaks on a continuous vertical
+    coordinate. Anchors each row on the full question ID in the NUMER column.
+    """
+
+    pdfplumber = import_pdfplumber()
+    tagged: list[tuple[float, float, int, str]] = []  # (global_top, x0, col, text)
+    offset = 0.0
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        stats.pages_scanned = max(stats.pages_scanned, len(pdf.pages))
+        for page in pdf.pages:
+            grid = _rectgrid_page_grid(page)
+            words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+            # Drop the per-page repeated header row. A real header carries several
+            # labels on one line; require >=3 so a stray "Numer" inside an answer
+            # never deletes a data row.
+            header_tokens: dict[int, set[str]] = {}
+            for word in words:
+                norm = re.sub(r"[^a-z0-9]", "", word["text"].lower())
+                if norm in RECTGRID_HEADER_TOKENS:
+                    header_tokens.setdefault(round(word["top"]), set()).add(norm)
+            header_tops = {top for top, toks in header_tokens.items() if len(toks) >= 3}
+            for word in words:
+                if round(word["top"]) in header_tops:
+                    continue
+                center = (word["x0"] + word["x1"]) / 2
+                column = _rectgrid_column(center, grid)
+                if column >= 0:
+                    tagged.append((offset + float(word["top"]), float(word["x0"]), column, word["text"]))
+            offset += float(getattr(page, "height", 0.0) or 0.0) + RECTGRID_PAGE_GAP
+
+    numer_items = [(t, x, txt) for (t, x, c, txt) in tagged if c == 1]
+    anchors: list[tuple[float, str]] = []
+    for row in _rectgrid_cluster_rows(numer_items):
+        joined = "".join(txt for _, _, txt in sorted(row, key=lambda item: item[1]))
+        ids = extract_question_ids(joined, full_only=True)
+        if ids:
+            anchors.append((min(t for t, _, _ in row), ids[0]))
+    anchors.sort()
+
+    tagged.sort(key=lambda item: (item[0], item[1]))
+    tops = [item[0] for item in tagged]
+
+    rows: list[ExtractedRow] = []
+    for index, (anchor_top, question_id) in enumerate(anchors):
+        end = anchors[index + 1][0] if index + 1 < len(anchors) else float("inf")
+        lo = bisect.bisect_left(tops, anchor_top - 3)
+        hi = bisect.bisect_left(tops, end - 0.5) if end != float("inf") else len(tagged)
+        columns: list[list[tuple[float, float, str]]] = [[] for _ in range(7)]
+        for (t, x, c, txt) in tagged[lo:hi]:
+            columns[c].append((t, x, txt))
+        cells = [
+            " ".join(txt for _, _, txt in sorted(col, key=lambda item: (round(item[0]), item[1]))).strip()
+            for col in columns
+        ]
+        stats.detected_ids.add(question_id)
+        rows.append(ExtractedRow(cells, 0, "rectgrid"))
+    return rows
 
 
 def extract_table_rows(pdf_path: Path, stats: ParseStats) -> list[ExtractedRow]:
@@ -800,7 +879,8 @@ def merge_candidates(candidates: Iterable[ExtractedRow], stats: ParseStats) -> l
     """Merge strategies, preserving first complete record for each question ID."""
 
     parsed_by_id: dict[str, ParsedQuestion] = {}
-    method_priority = {"pdfminer-geometry": 0, "geometry": 1, "regex": 2, "table-1-unjam": 3, "table-2-unjam": 4, "table-1": 5, "table-2": 6}
+    method_by_id: dict[str, str] = {}
+    method_priority = {"rectgrid": -1, "pdfminer-geometry": 0, "geometry": 1, "regex": 2, "table-1-unjam": 3, "table-2-unjam": 4, "table-1": 5, "table-2": 6}
     candidate_list = sorted(candidates, key=lambda row: (method_priority.get(row.method, 99), row.page_number))
 
     for candidate in candidate_list:
@@ -812,9 +892,13 @@ def merge_candidates(candidates: Iterable[ExtractedRow], stats: ParseStats) -> l
             continue
         for question in parsed_questions:
             if question.external_id in parsed_by_id:
-                stats.duplicate_ids.add(question.external_id)
+                # A lower-priority strategy re-finding an ID is expected and silent.
+                # Only flag a true duplicate: the *same* strategy emitting it twice.
+                if method_by_id[question.external_id] == candidate.method:
+                    stats.duplicate_ids.add(question.external_id)
                 continue
             parsed_by_id[question.external_id] = question
+            method_by_id[question.external_id] = candidate.method
             stats.detected_ids.add(question.external_id)
             stats.record_parsed(candidate.method)
     return sorted(parsed_by_id.values(), key=lambda question: (question.source_row_number or 10**9, question.external_id))
@@ -832,22 +916,29 @@ def audit_sequential_index(stats: ParseStats, parsed_questions: Sequence[ParsedQ
 
 def parse_pdf(pdf_path: Path) -> tuple[list[ParsedQuestion], ParseStats]:
     stats = ParseStats()
-    # Primary pass: pdfminer line geometry is substantially faster and less
-    # prone to table-row jamming than pdfplumber's table extractor.  Every full
-    # question ID becomes a hard row anchor here.
-    text_pages, pdfminer_lines, page_width = extract_pdfminer_pages(pdf_path, stats)
-    pdfminer_rows = extract_pdfminer_geometry_rows(pdfminer_lines, page_width, stats)
+    # Primary pass: rectangle-grid word extraction. The table's drawn rectangles
+    # give an exact, page-stable column grid, and rows are stitched across page
+    # breaks. This is the airtight source of truth for column separation.
+    rectgrid_rows = extract_rectgrid_rows(pdf_path, stats)
+
+    # Independent ID detection (for the completeness audit) plus a cheap regex
+    # fallback for any ID the primary pass might miss. merge_candidates keeps the
+    # highest-priority record per ID, so rectgrid always wins where present.
+    text_pages = collect_pdf_text(pdf_path, stats)
     regex_rows = extract_regex_rows(text_pages, stats)
 
-    # Keep the slower pdfplumber table/word passes as rescue strategies only if
-    # the anchor-driven text layer is absent or clearly unusable.
+    # Heavy pdfminer/table rescue passes run only if the primary grid pass failed
+    # entirely (e.g. a future PDF without the drawn table rectangles).
     rescue_rows: list[ExtractedRow] = []
-    if not pdfminer_rows:
-        table_rows = extract_table_rows(pdf_path, stats)
-        geometry_rows = extract_geometry_rows(pdf_path, stats)
-        rescue_rows = [*geometry_rows, *table_rows]
+    if not rectgrid_rows:
+        _, pdfminer_lines, page_width = extract_pdfminer_pages(pdf_path, stats)
+        rescue_rows = [
+            *extract_pdfminer_geometry_rows(pdfminer_lines, page_width, stats),
+            *extract_geometry_rows(pdf_path, stats),
+            *extract_table_rows(pdf_path, stats),
+        ]
 
-    questions = merge_candidates([*pdfminer_rows, *regex_rows, *rescue_rows], stats)
+    questions = merge_candidates([*rectgrid_rows, *regex_rows, *rescue_rows], stats)
     audit_sequential_index(stats, questions)
     return questions, stats
 
