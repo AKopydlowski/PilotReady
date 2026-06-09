@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import QuestionView from "./components/QuestionView";
 import ExamView from "./components/ExamView";
+import { useI18n, type Lang } from "./i18n";
 
 type Category = {
   id: string;
@@ -11,7 +12,7 @@ type Category = {
   unattempted: number;
 };
 
-type View = { kind: "dashboard" } | { kind: "learn"; categoryId: string; label: string } | { kind: "exam" };
+type View = { kind: "dashboard" } | { kind: "learn"; categoryId: string } | { kind: "exam" };
 
 // A stable demo user id so learning progress persists across reloads. A real
 // build would obtain this from authentication.
@@ -26,8 +27,29 @@ function useDemoUserId(): string {
   }, []);
 }
 
+function LanguageToggle() {
+  const { lang, setLang } = useI18n();
+  return (
+    <div className="flex gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 text-xs font-bold">
+      {(["pl", "en"] as Lang[]).map((code) => (
+        <button
+          key={code}
+          type="button"
+          onClick={() => setLang(code)}
+          className={`rounded-xl px-3 py-1.5 uppercase transition ${
+            lang === code ? "bg-cyan-300 text-slate-950" : "text-slate-400 hover:text-white"
+          }`}
+        >
+          {code}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const userId = useDemoUserId();
+  const { t } = useI18n();
   const [view, setView] = useState<View>({ kind: "dashboard" });
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,7 +62,7 @@ export default function App() {
     setError(null);
     fetch("/api/categories", { headers: { "X-User-Id": userId }, signal: controller.signal })
       .then((response) => {
-        if (!response.ok) throw new Error(`Nie udało się pobrać kategorii (${response.status})`);
+        if (!response.ok) throw new Error(t("dashboard.error", { status: response.status }));
         return response.json() as Promise<Category[]>;
       })
       .then(setCategories)
@@ -49,20 +71,20 @@ export default function App() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [userId, view.kind]);
+  }, [userId, view.kind, t]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.08),_transparent_45%)] px-4 py-6 md:px-8">
       <div className="mx-auto max-w-6xl">
-        <nav className="mb-8 flex items-center justify-between">
+        <nav className="mb-8 flex items-center justify-between gap-4">
           <button type="button" onClick={() => setView({ kind: "dashboard" })} className="flex items-center gap-3 text-left">
             <span className="grid h-11 w-11 place-items-center rounded-2xl bg-cyan-300 text-lg font-black text-slate-950">PR</span>
             <span>
               <span className="block text-lg font-bold text-white">PilotReady</span>
-              <span className="block text-xs uppercase tracking-[0.3em] text-cyan-300">PPL(A)</span>
+              <span className="block text-xs uppercase tracking-[0.3em] text-cyan-300">{t("app.tagline")}</span>
             </span>
           </button>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setView({ kind: "dashboard" })}
@@ -70,7 +92,7 @@ export default function App() {
                 view.kind !== "exam" ? "bg-white/10 text-white" : "text-slate-400 hover:text-white"
               }`}
             >
-              Nauka
+              {t("nav.learn")}
             </button>
             <button
               type="button"
@@ -79,8 +101,9 @@ export default function App() {
                 view.kind === "exam" ? "bg-cyan-300 text-slate-950" : "bg-white/5 text-slate-200 hover:bg-white/10"
               }`}
             >
-              Egzamin ULC
+              {t("nav.exam")}
             </button>
+            <LanguageToggle />
           </div>
         </nav>
 
@@ -93,7 +116,7 @@ export default function App() {
               onClick={() => setView({ kind: "dashboard" })}
               className="mb-4 text-sm text-cyan-300 hover:underline"
             >
-              ← Wróć do przedmiotów
+              {t("learn.back")}
             </button>
             <QuestionView userId={userId} categoryId={view.categoryId} />
           </div>
@@ -102,11 +125,11 @@ export default function App() {
         {view.kind === "dashboard" && (
           <main>
             <header className="mb-8">
-              <h1 className="text-3xl font-bold text-white">Twoje przedmioty</h1>
-              <p className="mt-2 text-slate-400">Ucz się pytaniami z banku PPL(A) lub podejdź do pełnej symulacji egzaminu ULC.</p>
+              <h1 className="text-3xl font-bold text-white">{t("dashboard.title")}</h1>
+              <p className="mt-2 text-slate-400">{t("dashboard.subtitle")}</p>
             </header>
 
-            {loading && <p className="text-slate-400">Ładowanie…</p>}
+            {loading && <p className="text-slate-400">{t("dashboard.loading")}</p>}
             {error && <p className="rounded-2xl border border-red-900/70 bg-red-950/40 p-4 text-red-100">{error}</p>}
 
             {!loading && !error && (
@@ -118,16 +141,16 @@ export default function App() {
                     <button
                       key={category.id}
                       type="button"
-                      onClick={() => setView({ kind: "learn", categoryId: category.id, label: category.label })}
+                      onClick={() => setView({ kind: "learn", categoryId: category.id })}
                       className="group flex flex-col rounded-3xl border border-white/10 bg-slate-950/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-300/60 hover:bg-cyan-300/5"
                     >
-                      <span className="text-base font-semibold text-white">{category.label}</span>
-                      <span className="mt-1 text-sm text-slate-400">{category.total} pytań w banku</span>
+                      <span className="text-base font-semibold text-white">{t(`subject.${category.id}`)}</span>
+                      <span className="mt-1 text-sm text-slate-400">{t("dashboard.questionsInBank", { n: category.total })}</span>
                       <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
                         <div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${percent}%` }} />
                       </div>
                       <span className="mt-2 text-xs text-slate-500">
-                        {attempted}/{category.total} przerobionych · {category.correct} poprawnych
+                        {t("dashboard.progress", { a: attempted, t: category.total, c: category.correct })}
                       </span>
                     </button>
                   );

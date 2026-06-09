@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 
 type ProgressStatus = "CORRECT" | "INCORRECT";
 
@@ -83,9 +84,13 @@ function classNames(...names: Array<string | false | null | undefined>) {
 }
 
 export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionViewProps) {
+  const { t } = useI18n();
   const [questions, setQuestions] = useState<ApiQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<LocalAnswerState | null>(null);
+  // questionId -> latest known result, seeded from the server and updated as the
+  // learner answers. Drives the "your mistakes" review panel.
+  const [statuses, setStatuses] = useState<Record<string, ProgressStatus>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "queued" | "syncing" | "synced" | "failed">("idle");
@@ -107,6 +112,14 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
       .then((payload) => {
         setQuestions(payload);
         setCurrentIndex(0);
+        // Seed statuses from the server, then overlay any locally-saved answers.
+        const seeded: Record<string, ProgressStatus> = {};
+        for (const question of payload) {
+          const local = loadLocalAnswer(userId, question.id);
+          const status = local?.status ?? question.progress_status ?? null;
+          if (status === "CORRECT" || status === "INCORRECT") seeded[question.id] = status;
+        }
+        setStatuses(seeded);
       })
       .catch((fetchError: Error) => {
         if (fetchError.name !== "AbortError") setError(fetchError.message);
@@ -121,6 +134,7 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
   const shuffledAnswers = useMemo(() => {
     if (!currentQuestion) return [];
     return shuffleAnswers(currentQuestion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentQuestion?.id]);
 
   const syncProgress = useCallback(
@@ -172,10 +186,11 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
   const handleAnswerClick = (answer: ShuffledAnswer) => {
     if (!currentQuestion || selectedAnswer) return;
 
+    const status: ProgressStatus = answer.isCorrect ? "CORRECT" : "INCORRECT";
     const answerState: LocalAnswerState = {
       questionId: currentQuestion.id,
       selectedText: answer.text,
-      status: answer.isCorrect ? "CORRECT" : "INCORRECT",
+      status,
       answeredAt: new Date().toISOString(),
       clientEventId: crypto.randomUUID?.() ?? `${currentQuestion.id}:${Date.now()}`,
       synced: false,
@@ -184,14 +199,21 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
     // Synchronous local autosave happens before React state updates or network I/O.
     saveLocalAnswer(userId, answerState);
     setSelectedAnswer(answerState);
+    setStatuses((prev) => ({ ...prev, [currentQuestion.id]: status }));
     syncProgress(answerState);
   };
 
   const goToNext = () => setCurrentIndex((index) => Math.min(index + 1, questions.length - 1));
   const goToPrevious = () => setCurrentIndex((index) => Math.max(index - 1, 0));
 
+  // Indexes of questions answered incorrectly — powers the mistakes review panel.
+  const mistakeIndexes = useMemo(
+    () => questions.map((question, index) => ({ question, index })).filter(({ question }) => statuses[question.id] === "INCORRECT"),
+    [questions, statuses],
+  );
+
   if (isLoading) {
-    return <section className="rounded-3xl border border-slate-800 bg-slate-950 p-8 text-slate-300">Loading flight deck…</section>;
+    return <section className="rounded-3xl border border-slate-800 bg-slate-950 p-8 text-slate-300">{t("learn.loading")}</section>;
   }
 
   if (error) {
@@ -199,7 +221,7 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
   }
 
   if (!currentQuestion) {
-    return <section className="rounded-3xl border border-slate-800 bg-slate-950 p-8 text-slate-300">No questions found.</section>;
+    return <section className="rounded-3xl border border-slate-800 bg-slate-950 p-8 text-slate-300">{t("learn.empty")}</section>;
   }
 
   const progressPercent = Math.round(((currentIndex + 1) / questions.length) * 100);
@@ -208,18 +230,18 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
     <section className="min-h-[680px] rounded-[2rem] border border-cyan-400/10 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_34%),linear-gradient(145deg,_#020617,_#0f172a_58%,_#111827)] p-6 text-slate-100 shadow-2xl shadow-cyan-950/30">
       <header className="mb-8 flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">PilotReady Training</p>
-          <h2 className="mt-2 text-2xl font-bold text-white">{currentQuestion.category.replaceAll("_", " ")}</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">{t("learn.kicker")}</p>
+          <h2 className="mt-2 text-2xl font-bold text-white">{t(`subject.${currentQuestion.category}`)}</h2>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300 backdrop-blur">
-          Question {currentIndex + 1} / {questions.length} · {progressPercent}% complete
+          {t("learn.questionCounter", { i: currentIndex + 1, n: questions.length, p: progressPercent })}
         </div>
       </header>
 
       <article className="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-xl shadow-black/30">
         <div className="mb-5 flex items-center justify-between gap-4 text-xs uppercase tracking-[0.28em] text-slate-400">
           <span>{currentQuestion.external_id}</span>
-          <span className="text-cyan-300">{syncState === "failed" ? "Saved locally · retry pending" : syncState}</span>
+          <span className="text-cyan-300">{t(`sync.${syncState}`)}</span>
         </div>
         <h3 className="text-2xl font-semibold leading-relaxed text-white">{currentQuestion.question_text}</h3>
 
@@ -250,6 +272,19 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
             );
           })}
         </div>
+
+        {selectedAnswer && (
+          <p
+            className={classNames(
+              "mt-6 rounded-2xl border px-5 py-3 text-sm font-semibold",
+              selectedAnswer.status === "CORRECT"
+                ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                : "border-red-400/40 bg-red-500/10 text-red-200",
+            )}
+          >
+            {selectedAnswer.status === "CORRECT" ? t("learn.correct") : t("learn.incorrect")}
+          </p>
+        )}
       </article>
 
       <footer className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -259,20 +294,58 @@ export function QuestionView({ userId, categoryId, apiBaseUrl = "" }: QuestionVi
           disabled={currentIndex === 0}
           className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Previous
+          {t("learn.previous")}
         </button>
-        <p className="text-center text-sm text-slate-400">
-          Answers save instantly to this device, then sync quietly to your PilotReady account.
-        </p>
+        <p className="text-center text-sm text-slate-400">{t("learn.footer")}</p>
         <button
           type="button"
           onClick={goToNext}
           disabled={currentIndex === questions.length - 1}
           className="rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Next
+          {t("learn.next")}
         </button>
       </footer>
+
+      {/* Your mistakes — only the questions answered incorrectly, jumpable. */}
+      <div className="mt-8 rounded-3xl border border-white/10 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+          <div>
+            <h3 className="text-lg font-bold text-white">{t("learn.mistakesTitle")}</h3>
+            <p className="text-sm text-slate-400">{t("learn.mistakesSubtitle")}</p>
+          </div>
+          {mistakeIndexes.length > 0 && (
+            <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-bold text-red-300">
+              {t("learn.mistakesCount", { n: mistakeIndexes.length })}
+            </span>
+          )}
+        </div>
+
+        {mistakeIndexes.length === 0 ? (
+          <p className="mt-4 text-sm text-emerald-200">{t("learn.mistakesEmpty")}</p>
+        ) : (
+          <ol className="mt-4 grid gap-2">
+            {mistakeIndexes.map(({ question, index }) => (
+              <li key={question.id}>
+                <button
+                  type="button"
+                  onClick={() => setCurrentIndex(index)}
+                  className={classNames(
+                    "flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition hover:border-cyan-300/60 hover:bg-cyan-300/5",
+                    index === currentIndex ? "border-cyan-300/60 bg-cyan-300/10" : "border-white/10",
+                  )}
+                >
+                  <span className="flex h-7 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/20 text-xs font-bold text-red-300">
+                    {index + 1}
+                  </span>
+                  <span className="flex-1 truncate text-sm text-slate-200">{question.question_text}</span>
+                  <span className="shrink-0 text-[11px] uppercase tracking-wider text-slate-500">{question.external_id}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </section>
   );
 }

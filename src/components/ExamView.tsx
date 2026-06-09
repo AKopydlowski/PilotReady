@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 
 // --------------------------------------------------------------------------- //
 // API contract — mirrors backend/exam.py
@@ -67,7 +68,7 @@ type ExamSubmitResponse = {
 type FlatQuestion = {
   globalIndex: number;
   sectionIndex: number;
-  sectionLabel: string;
+  sectionCategory: string;
   question: ExamQuestion;
 };
 
@@ -98,6 +99,7 @@ function formatClock(totalSeconds: number): string {
 // Component
 // --------------------------------------------------------------------------- //
 export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
+  const { t } = useI18n();
   const [exam, setExam] = useState<ExamStartResponse | null>(null);
   const [phase, setPhase] = useState<ExamPhase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +121,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
 
     fetch(`${apiBaseUrl}/api/exam/start`, { method: "POST", signal: controller.signal })
       .then((response) => {
-        if (!response.ok) throw new Error(`Could not start exam (${response.status})`);
+        if (!response.ok) throw new Error(t("exam.startError", { status: response.status }));
         return response.json() as Promise<ExamStartResponse>;
       })
       .then((payload) => {
@@ -146,7 +148,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
     const flat: FlatQuestion[] = [];
     exam.sections.forEach((section, sectionIndex) => {
       section.questions.forEach((question) => {
-        flat.push({ globalIndex: flat.length, sectionIndex, sectionLabel: section.label, question });
+        flat.push({ globalIndex: flat.length, sectionIndex, sectionCategory: section.category, question });
       });
     });
     return flat;
@@ -173,7 +175,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
           })),
         }),
       });
-      if (!response.ok) throw new Error(`Could not submit exam (${response.status})`);
+      if (!response.ok) throw new Error(t("exam.submitError", { status: response.status }));
       const payload = (await response.json()) as ExamSubmitResponse;
       setResult(payload);
       setPhase("finished");
@@ -203,7 +205,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
       <section className="grid min-h-[680px] place-items-center rounded-[2rem] border border-cyan-400/10 bg-slate-950 p-8 text-slate-300">
         <div className="flex flex-col items-center gap-3">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
-          <p className="text-sm uppercase tracking-[0.35em] text-cyan-300">Assembling ULC exam…</p>
+          <p className="text-sm uppercase tracking-[0.35em] text-cyan-300">{t("exam.assembling")}</p>
         </div>
       </section>
     );
@@ -213,10 +215,10 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
     return (
       <section className="grid min-h-[680px] place-items-center rounded-[2rem] border border-red-900/70 bg-red-950/40 p-8 text-red-100">
         <div className="flex flex-col items-center gap-4 text-center">
-          <p>{error ?? "Something went wrong."}</p>
+          <p>{error}</p>
           {onExit && (
             <button type="button" onClick={onExit} className="rounded-2xl border border-red-300/40 px-5 py-3 text-sm font-semibold">
-              Back to safety briefing
+              {t("exam.errorBack")}
             </button>
           )}
         </div>
@@ -226,7 +228,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
 
   // ----- Render: results ----------------------------------------------------
   if (phase === "finished" && result) {
-    return <ExamResultScreen result={result} questions={flatQuestions} onExit={onExit} />;
+    return <ExamResultScreen result={result} questions={flatQuestions} onExit={onExit} t={t} />;
   }
 
   const current = flatQuestions[currentIndex];
@@ -254,8 +256,8 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
       {/* Header / timer */}
       <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">ULC Exam Simulation</p>
-          <h2 className="mt-2 text-2xl font-bold text-white">{current?.sectionLabel}</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">{t("exam.kicker")}</p>
+          <h2 className="mt-2 text-2xl font-bold text-white">{current ? t(`subject.${current.sectionCategory}`) : ""}</h2>
         </div>
         <div
           className={classNames(
@@ -267,7 +269,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
                 : "border-white/10 bg-white/5 text-slate-100",
           )}
         >
-          <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Time left</span>
+          <span className="text-xs uppercase tracking-[0.3em] text-slate-400">{t("exam.timeLeft")}</span>
           <span className="font-mono text-2xl font-bold tabular-nums tracking-wider">{formatClock(secondsLeft)}</span>
         </div>
       </header>
@@ -276,9 +278,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
         {/* Question pane */}
         <article className="flex flex-col rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-xl shadow-black/30">
           <div className="mb-5 flex items-center justify-between gap-4 text-xs uppercase tracking-[0.28em] text-slate-400">
-            <span>
-              Question {currentIndex + 1} / {totalCount}
-            </span>
+            <span>{t("exam.questionCounter", { i: currentIndex + 1, n: totalCount })}</span>
             <span>{current?.question.external_id}</span>
           </div>
           <h3 className="text-xl font-semibold leading-relaxed text-white md:text-2xl">{current?.question.question_text}</h3>
@@ -323,7 +323,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
               disabled={currentIndex === 0}
               className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Previous
+              {t("learn.previous")}
             </button>
             <button
               type="button"
@@ -331,7 +331,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
               disabled={answers[current.question.id] === undefined}
               className="rounded-2xl px-4 py-3 text-sm font-semibold text-slate-400 underline-offset-4 hover:text-slate-200 hover:underline disabled:cursor-not-allowed disabled:opacity-30"
             >
-              Clear selection
+              {t("exam.clear")}
             </button>
             {isLastQuestion ? (
               <button
@@ -339,7 +339,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
                 onClick={() => void submitExam()}
                 className="rounded-2xl bg-emerald-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-300"
               >
-                Submit Exam
+                {t("exam.submit")}
               </button>
             ) : (
               <button
@@ -347,7 +347,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
                 onClick={() => goTo(currentIndex + 1)}
                 className="rounded-2xl bg-cyan-300 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/40 transition hover:bg-cyan-200"
               >
-                Next
+                {t("learn.next")}
               </button>
             )}
           </div>
@@ -356,10 +356,9 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
         {/* Review sheet sidebar */}
         <aside className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/50 p-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">Review sheet</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">{t("exam.reviewSheet")}</p>
             <p className="mt-2 text-sm text-slate-300">
-              <span className="font-bold text-white">{answeredCount}</span> answered ·{" "}
-              <span className="font-bold text-white">{totalCount - answeredCount}</span> skipped
+              {t("exam.answeredSkipped", { answered: answeredCount, skipped: totalCount - answeredCount })}
             </p>
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
               <div
@@ -371,13 +370,13 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
 
           <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded bg-cyan-300" /> Answered
+              <span className="h-3 w-3 rounded bg-cyan-300" /> {t("exam.legendAnswered")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded border border-white/25" /> Skipped
+              <span className="h-3 w-3 rounded border border-white/25" /> {t("exam.legendSkipped")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded ring-2 ring-cyan-300" /> Current
+              <span className="h-3 w-3 rounded ring-2 ring-cyan-300" /> {t("exam.legendCurrent")}
             </span>
           </div>
 
@@ -387,7 +386,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
               return (
                 <div key={section.category} className="mb-4">
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    {section.label} · {section.duration_minutes}m
+                    {t(`subject.${section.category}`)} · {section.duration_minutes}m
                   </p>
                   <div className="grid grid-cols-6 gap-1.5">
                     {section.questions.map((question, indexInSection) => {
@@ -399,7 +398,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
                           key={question.id}
                           type="button"
                           onClick={() => goTo(globalIndex)}
-                          title={`Question ${globalIndex + 1}`}
+                          title={t("exam.questionCounter", { i: globalIndex + 1, n: totalCount })}
                           className={classNames(
                             "flex h-8 items-center justify-center rounded-lg text-xs font-semibold transition",
                             isAnswered ? "bg-cyan-300 text-slate-950" : "border border-white/15 text-slate-400 hover:border-cyan-300/50",
@@ -422,7 +421,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
             disabled={phase === "submitting"}
             className="rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-300 disabled:opacity-50"
           >
-            {phase === "submitting" ? "Submitting…" : "Submit Exam"}
+            {phase === "submitting" ? t("exam.submitting") : t("exam.submit")}
           </button>
         </aside>
       </div>
@@ -437,10 +436,12 @@ function ExamResultScreen({
   result,
   questions,
   onExit,
+  t,
 }: {
   result: ExamSubmitResponse;
   questions: FlatQuestion[];
   onExit?: () => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   const [onlyWrong, setOnlyWrong] = useState(true);
 
@@ -466,20 +467,23 @@ function ExamResultScreen({
   return (
     <section className="min-h-[680px] rounded-[2rem] border border-cyan-400/10 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_34%),linear-gradient(145deg,_#020617,_#0f172a_58%,_#111827)] p-6 text-slate-100 shadow-2xl shadow-cyan-950/30">
       <header className="mb-8 flex flex-col items-center gap-3 border-b border-white/10 pb-8 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">Wynik egzaminu</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">{t("result.kicker")}</p>
         <div
           className={classNames(
             "rounded-full px-8 py-3 text-3xl font-black tracking-wide",
             result.passed ? "bg-emerald-400/15 text-emerald-300" : "bg-red-500/15 text-red-300",
           )}
         >
-          {result.passed ? "ZDANY" : "NIEZDANY"}
+          {result.passed ? t("result.passed") : t("result.failed")}
         </div>
         <p className="text-lg text-slate-200">
-          Wynik ogólny <span className="font-bold text-white">{result.overall_score_percent}%</span> ·{" "}
-          {result.total_correct}/{result.total_questions} poprawnych
+          {t("result.overall", {
+            p: result.overall_score_percent,
+            c: result.total_correct,
+            t: result.total_questions,
+          })}
         </p>
-        <p className="text-sm text-slate-400">Zaliczenie wymaga min. {result.pass_threshold_percent}% w każdym przedmiocie.</p>
+        <p className="text-sm text-slate-400">{t("result.threshold", { p: result.pass_threshold_percent })}</p>
       </header>
 
       <div className="grid gap-3">
@@ -501,9 +505,13 @@ function ExamResultScreen({
                 {section.passed ? "✓" : "✕"}
               </span>
               <div>
-                <p className="font-semibold text-white">{section.label}</p>
+                <p className="font-semibold text-white">{t(`subject.${section.category}`)}</p>
                 <p className="text-xs text-slate-400">
-                  {section.correct}/{section.question_count} poprawnych · {section.answered} udzielonych
+                  {t("result.sectionStats", {
+                    correct: section.correct,
+                    count: section.question_count,
+                    answered: section.answered,
+                  })}
                 </p>
               </div>
             </div>
@@ -524,8 +532,8 @@ function ExamResultScreen({
       <div className="mt-10">
         <div className="mb-4 flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-white">Przegląd odpowiedzi</h3>
-            <p className="text-sm text-slate-400">{wrongCount} błędnych / pominiętych z {reviewItems.length} pytań</p>
+            <h3 className="text-lg font-bold text-white">{t("result.reviewTitle")}</h3>
+            <p className="text-sm text-slate-400">{t("result.reviewSummary", { wrong: wrongCount, total: reviewItems.length })}</p>
           </div>
           <div className="flex gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 text-sm font-semibold">
             <button
@@ -533,21 +541,21 @@ function ExamResultScreen({
               onClick={() => setOnlyWrong(true)}
               className={classNames("rounded-xl px-4 py-2 transition", onlyWrong ? "bg-cyan-300 text-slate-950" : "text-slate-300")}
             >
-              Tylko błędne
+              {t("result.onlyWrong")}
             </button>
             <button
               type="button"
               onClick={() => setOnlyWrong(false)}
               className={classNames("rounded-xl px-4 py-2 transition", !onlyWrong ? "bg-cyan-300 text-slate-950" : "text-slate-300")}
             >
-              Wszystkie
+              {t("result.all")}
             </button>
           </div>
         </div>
 
         {visibleItems.length === 0 ? (
           <p className="rounded-2xl border border-emerald-400/30 bg-emerald-400/5 p-5 text-center text-emerald-200">
-            Komplet poprawnych odpowiedzi — brak błędów do przejrzenia. 🎉
+            {t("result.allCorrect")}
           </p>
         ) : (
           <div className="grid gap-4">
@@ -567,7 +575,7 @@ function ExamResultScreen({
                 >
                   <div className="mb-3 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.2em] text-slate-400">
                     <span>
-                      #{item.globalIndex + 1} · {item.sectionLabel} · {item.question.external_id}
+                      #{item.globalIndex + 1} · {t(`subject.${item.sectionCategory}`)} · {item.question.external_id}
                     </span>
                     <span
                       className={classNames(
@@ -579,7 +587,11 @@ function ExamResultScreen({
                             : "bg-amber-400/15 text-amber-200",
                       )}
                     >
-                      {status === "correct" ? "DOBRZE" : status === "wrong" ? "ŹLE" : "POMINIĘTE"}
+                      {status === "correct"
+                        ? t("result.badgeCorrect")
+                        : status === "wrong"
+                          ? t("result.badgeWrong")
+                          : t("result.badgeSkipped")}
                     </span>
                   </div>
                   <p className="mb-4 font-semibold leading-relaxed text-white">{item.question.question_text}</p>
@@ -601,13 +613,13 @@ function ExamResultScreen({
                         >
                           <span className="font-bold">{answer.key}</span>
                           <span className="flex-1 leading-relaxed">{answer.text}</span>
-                          {isCorrect && <span className="text-xs font-bold text-emerald-300">✓ poprawna</span>}
-                          {isPicked && !isCorrect && <span className="text-xs font-bold text-red-300">Twój wybór</span>}
+                          {isCorrect && <span className="text-xs font-bold text-emerald-300">{t("result.correctTag")}</span>}
+                          {isPicked && !isCorrect && <span className="text-xs font-bold text-red-300">{t("result.yourChoice")}</span>}
                         </div>
                       );
                     })}
                   </div>
-                  {status === "skipped" && <p className="mt-3 text-xs text-amber-200/80">Nie udzielono odpowiedzi.</p>}
+                  {status === "skipped" && <p className="mt-3 text-xs text-amber-200/80">{t("result.notAnswered")}</p>}
                 </article>
               );
             })}
@@ -622,7 +634,7 @@ function ExamResultScreen({
             onClick={onExit}
             className="rounded-2xl bg-cyan-300 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/40 transition hover:bg-cyan-200"
           >
-            Powrót do panelu
+            {t("result.back")}
           </button>
         </footer>
       )}
