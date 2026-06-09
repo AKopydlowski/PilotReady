@@ -54,6 +54,9 @@ CATEGORY_BY_PREFIX = {
     "070": "OPERATIONAL_PROCEDURES",
     "080": "PRINCIPLES_OF_FLIGHT",
     "090": "COMMUNICATIONS",
+    # 099 and 100 are supplementary safety/emergency/accident-investigation banks
+    # (not one of the nine ULC exam subjects); group them under general safety.
+    "099": "GENERAL_SAFETY",
     "100": "GENERAL_SAFETY",
 }
 
@@ -176,7 +179,7 @@ def row_looks_like_header(row: Sequence[object]) -> bool:
 def infer_category(external_id: str) -> str:
     """Infer one of the PPL(A) subjects from common numeric prefixes."""
 
-    match = re.search(r"(?:^|[^0-9])(010|020|030|040|050|060|070|080|090|100)(?:[^0-9]|$)", external_id)
+    match = re.search(r"(?:^|[^0-9])(010|020|030|040|050|060|070|080|090|099|100)(?:[^0-9]|$)", external_id)
     return CATEGORY_BY_PREFIX.get(match.group(1), "UNKNOWN") if match else "UNKNOWN"
 
 

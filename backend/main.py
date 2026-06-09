@@ -28,6 +28,9 @@ CATEGORY_LABELS: dict[QuestionCategory, str] = {
     QuestionCategory.OPERATIONAL_PROCEDURES: "Operational Procedures",
     QuestionCategory.PRINCIPLES_OF_FLIGHT: "Principles of Flight",
     QuestionCategory.COMMUNICATIONS: "Communications",
+    # Not a ULC exam subject (the exam uses the nine above), but its ~106
+    # supplementary safety/emergency questions are still offered for study.
+    QuestionCategory.GENERAL_SAFETY: "General Safety",
 }
 SUBJECT_ORDER = tuple(CATEGORY_LABELS.keys())
 

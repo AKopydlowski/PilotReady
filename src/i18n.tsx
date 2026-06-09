@@ -82,6 +82,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "subject.OPERATIONAL_PROCEDURES": "Procedury operacyjne",
     "subject.PRINCIPLES_OF_FLIGHT": "Zasady lotu",
     "subject.COMMUNICATIONS": "Łączność",
+    "subject.GENERAL_SAFETY": "Bezpieczeństwo i sytuacje awaryjne",
+    "subject.UNKNOWN": "Pozostałe",
   },
   en: {
     "app.tagline": "PPL(A)",
@@ -161,6 +163,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "subject.OPERATIONAL_PROCEDURES": "Operational Procedures",
     "subject.PRINCIPLES_OF_FLIGHT": "Principles of Flight",
     "subject.COMMUNICATIONS": "Communications",
+    "subject.GENERAL_SAFETY": "General Safety & Emergencies",
+    "subject.UNKNOWN": "Other",
   },
 };
 
