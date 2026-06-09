@@ -10,10 +10,12 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import case, create_engine, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
+from backend.database import get_session
+from backend.exam import router as exam_router
 from backend.models import ProgressStatus, Question, QuestionCategory, User, UserProgress
 
 CATEGORY_LABELS: dict[QuestionCategory, str] = {
@@ -30,20 +32,6 @@ CATEGORY_LABELS: dict[QuestionCategory, str] = {
 SUBJECT_ORDER = tuple(CATEGORY_LABELS.keys())
 
 
-def get_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to start the PilotReady API")
-    if database_url.startswith("postgres://"):
-        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
-    if database_url.startswith("postgresql://"):
-        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return database_url
-
-
-engine = create_engine(get_database_url(), pool_pre_ping=True, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
-
 app = FastAPI(title="PilotReady API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +40,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(exam_router)
 
 
 class CategoryProgressResponse(BaseModel):
@@ -104,11 +93,6 @@ class ProgressResponse(BaseModel):
     status: ProgressStatus
     attempts_count: int
     last_answered_at: datetime
-
-
-def get_session() -> Session:
-    with SessionLocal() as session:
-        yield session
 
 
 def get_logged_in_user_id(
