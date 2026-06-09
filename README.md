@@ -17,12 +17,27 @@ zbliżonych do prawdziwych: z zegarem, limitami czasu i progiem zaliczenia.
 
 ## ✨ Co potrafi PilotReady
 
-### 📚 Tryb nauki
-- **9 przedmiotów** PPL(A), każdy z własną pulą pytań z oficjalnego banku.
-- Pasek postępu pokazuje, ile pytań w danym przedmiocie masz już przerobione.
+### 📚 Tryb nauki — sesje po 10
+- **10 kategorii**: 9 przedmiotów PPL(A) + „Bezpieczeństwo i sytuacje awaryjne"
+  (materiał dodatkowy). Razem **2053 pytania** z oficjalnego banku.
+- **Nauka w sesjach po 10 pytań** zamiast 500 naraz — po każdej dziesiątce
+  dostajesz mini-wynik i decydujesz: „Następne 10" czy koniec.
+- **Mądra kolejność**: najpierw pytania, w których się myliłeś, potem
+  nieprzerobione; opanowane (odpowiedziane poprawnie) są pomijane. Pytania
+  krążą, aż **opanujesz cały przedmiot** 🎉.
+- **Pasek opanowania** pokazuje, ile pytań w przedmiocie masz już zaliczone.
 - Odpowiedzi są **tasowane przy każdym wyświetleniu** — uczysz się treści, a nie
-  pozycji „zawsze A".
-- Twój postęp zapisuje się automatycznie (lokalnie i po stronie konta).
+  pozycji „zawsze A". Postęp zapisuje się automatycznie po każdym pytaniu.
+
+### 🔁 Powtórka błędów
+- Pod przedmiotami zbierają się **Twoje błędne odpowiedzi** — osobno **dla
+  każdego przedmiotu** oraz z opcją **„Powtórz wszystkie" naraz**.
+- Powtórka jedzie tym samym silnikiem sesji po 10. Gdy odpowiesz dobrze, pytanie
+  **znika z puli błędów**; jak znowu źle — zostaje. Prosty system typu Leitner.
+
+### 🌐 Dwa języki (PL / EN)
+- Przełącznik **PL / EN** w nagłówku zmienia cały interfejs; wybór jest
+  zapamiętywany. Nazwy przedmiotów też się lokalizują.
 
 ### 📝 Symulacja egzaminu ULC
 Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
@@ -62,7 +77,7 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 | **Frontend** | React + TypeScript + Vite, stylowanie Tailwind CSS (ciemny motyw) |
 | **Backend** | FastAPI + SQLAlchemy (Python) |
 | **Baza danych** | PostgreSQL (lokalnie lub w chmurze, np. [Neon](https://neon.tech)) |
-| **Dane** | Parser PDF oparty na pdfminer, wyciągający 2053 pytania z oficjalnego źródła |
+| **Dane** | Parser PDF (pdfplumber) przypisujący każde słowo do kolumny wg **siatki prostokątów tabeli** + sklejanie wierszy przez łamanie stron — szczelne 2053 pytania |
 
 Mała, ale ważna zasada projektowa: w bazie **poprawna odpowiedź zawsze siedzi pod
 kluczem `A`** (źródło trzyma ją w kolumnie `ODP1`). Tasowanie odbywa się dopiero
@@ -77,15 +92,17 @@ PilotReady/
 │   ├── database.py    # konfiguracja bazy (czyta .env)
 │   └── models.py      # modele SQLAlchemy
 ├── scripts/
-│   ├── parse_ppla_pdf.py   # PDF → data/questions.json
-│   └── seed_db.py          # questions.json → baza
+│   ├── parse_ppla_pdf.py     # PDF → data/questions.json (siatka prostokątów)
+│   ├── validate_questions.py # test szczelności banku pytań
+│   └── seed_db.py            # questions.json → baza
 ├── src/
-│   ├── App.tsx             # panel z przedmiotami + wejście do egzaminu
+│   ├── App.tsx               # panel: przedmioty + powtórka błędów + egzamin
+│   ├── i18n.tsx              # tłumaczenia PL/EN + przełącznik języka
 │   └── components/
-│       ├── QuestionView.tsx  # tryb nauki
+│       ├── StudySession.tsx  # tryb nauki — sesje po 10 (też powtórka błędów)
 │       └── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
 ├── database/schema.sql
-└── ppla.pdf                # oficjalne źródło pytań (import jednorazowy)
+└── ppla.pdf                  # oficjalne źródło pytań (import jednorazowy)
 ```
 
 ---
@@ -110,6 +127,10 @@ cp .env.example .env        # PowerShell: Copy-Item .env.example .env
 
 # wyciągnij pytania z PDF do data/questions.json
 python scripts/parse_ppla_pdf.py --input ppla.pdf --output data/questions.json --pretty
+
+# (opcjonalnie) sprawdź szczelność banku: 2053 pytania, 4 niepuste odpowiedzi,
+# klucz A = poprawna, 0 nieprzypisanych. Zwraca kod !=0 jeśli coś jest nie tak.
+python scripts/validate_questions.py
 
 # wgraj pytania do bazy (utworzy tabele i zaseeduje 2053 pytania)
 python scripts/seed_db.py
@@ -166,9 +187,10 @@ W repo leży tylko `.env.example` jako szablon.
 
 ## 🗺️ Co dalej (pomysły na rozwój)
 
-- Konta użytkowników i logowanie (model już czeka w bazie).
-- Historia podejść do egzaminu i statystyki słabych punktów.
-- Skok z błędnego pytania prosto do nauki danego przedmiotu.
+- Konta użytkowników i logowanie (model już czeka w bazie; teraz działa
+  tryb demo z automatycznie tworzonym użytkownikiem).
+- Historia podejść do egzaminu i statystyki słabych punktów w czasie.
+- Spaced repetition z prawdziwym harmonogramem powtórek (terminy „due").
 - Wersja mobilna / PWA do nauki w terenie.
 
 ---
