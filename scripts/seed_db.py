@@ -11,12 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -24,27 +23,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Importing backend.database loads the project-root .env (via python-dotenv) and
+# builds the shared engine, so this script always targets the SAME database the
+# API uses — the one configured in DATABASE_URL, not the default "postgres" db.
+from backend.database import engine  # noqa: E402
 from backend.models import Base, Question, QuestionCategory  # noqa: E402
 
 LOGGER = logging.getLogger("seed_db")
 DEFAULT_QUESTIONS_PATH = REPO_ROOT / "data" / "questions.json"
 DEFAULT_BATCH_SIZE = 500
-
-
-def get_database_url() -> str:
-    """Return the configured SQLAlchemy database URL."""
-
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL is required, for example: "
-            "postgresql+psycopg://user:password@localhost:5432/pilotready"
-        )
-    if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
-    elif database_url.startswith("postgresql://"):
-        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return database_url
 
 
 def load_questions(path: Path) -> list[dict[str, Any]]:
@@ -113,11 +100,17 @@ def normalize_answers(question: dict[str, Any]) -> tuple[str, list[str], list[di
     return correct_answer, distractors, answers
 
 
-def build_rows(questions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Validate parser objects and build insert-ready rows."""
+def build_rows(questions: Iterable[dict[str, Any]], *, skip_invalid: bool = False) -> list[dict[str, Any]]:
+    """Validate parser objects and build insert-ready rows.
+
+    When ``skip_invalid`` is set, questions that fail validation (e.g. the known
+    parser bug where two answer cells merge and one becomes empty) are logged and
+    dropped instead of aborting the whole seed.
+    """
 
     rows: list[dict[str, Any]] = []
     seen_external_ids: set[str] = set()
+    skipped: list[str] = []
 
     for question in questions:
         external_id = str(question.get("external_id") or "").strip()
@@ -128,7 +121,15 @@ def build_rows(questions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError(f"Duplicate external_id in JSON payload: {external_id}")
         seen_external_ids.add(external_id)
 
-        correct_answer, distractors, answers = normalize_answers(question)
+        try:
+            correct_answer, distractors, answers = normalize_answers(question)
+        except ValueError as exc:
+            if not skip_invalid:
+                raise
+            skipped.append(external_id)
+            LOGGER.warning("Skipping invalid question %s: %s", external_id, exc)
+            continue
+
         rows.append(
             {
                 "external_id": external_id,
@@ -142,6 +143,9 @@ def build_rows(questions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
 
+    if skipped:
+        LOGGER.warning("Skipped %s malformed question(s): %s", len(skipped), ", ".join(skipped))
+
     return rows
 
 
@@ -153,7 +157,6 @@ def chunks(rows: list[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any
 def seed(rows: list[dict[str, Any]], *, batch_size: int) -> int:
     """Upsert question rows and return the number of rows submitted."""
 
-    engine = create_engine(get_database_url(), future=True)
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
@@ -183,14 +186,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Seed PilotReady questions into PostgreSQL")
     parser.add_argument("--questions-path", type=Path, default=DEFAULT_QUESTIONS_PATH)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument(
+        "--skip-invalid",
+        action="store_true",
+        help="Skip (and log) malformed questions instead of aborting the seed.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
+    # Surface the exact target so the user can confirm pgAdmin is pointed at the
+    # same database (host/port/db name shown, password masked).
+    LOGGER.info("Targeting database: %s", engine.url.render_as_string(hide_password=True))
     questions = load_questions(args.questions_path)
-    rows = build_rows(questions)
+    rows = build_rows(questions, skip_invalid=args.skip_invalid)
     LOGGER.info("Loaded %s questions from %s", len(rows), args.questions_path)
     seeded_count = seed(rows, batch_size=args.batch_size)
     LOGGER.info("Successfully seeded %s questions into the database", seeded_count)
