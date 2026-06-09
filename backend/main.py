@@ -196,14 +196,55 @@ def get_questions(
     ]
 
 
+@app.get("/api/mistakes", response_model=list[QuestionResponse])
+def get_mistakes(
+    current_user_id: Annotated[uuid.UUID, Depends(get_logged_in_user_id)],
+    session: Annotated[Session, Depends(get_session)],
+) -> list[QuestionResponse]:
+    """Every question the user has most recently answered incorrectly, across all
+    subjects — the pool that powers the 'review your mistakes' study mode."""
+
+    rows = session.execute(
+        select(Question)
+        .join(UserProgress, UserProgress.question_id == Question.id)
+        .where(UserProgress.user_id == current_user_id, UserProgress.status == ProgressStatus.INCORRECT)
+        .order_by(Question.category.asc(), Question.source_row_number.asc().nullslast(), Question.external_id.asc())
+    ).scalars().all()
+
+    return [
+        QuestionResponse(
+            id=question.id,
+            external_id=question.external_id,
+            category=question.category.value,
+            question_text=question.question_text,
+            correct_answer=question.correct_answer,
+            answers=[QuestionAnswerResponse(key=answer["key"], text=answer["text"]) for answer in question.answers],
+            progress_status="INCORRECT",
+        )
+        for question in rows
+    ]
+
+
 @app.post("/api/progress", response_model=ProgressResponse)
 def upsert_progress(payload: ProgressRequest, session: Annotated[Session, Depends(get_session)]) -> ProgressResponse:
     if payload.status == ProgressStatus.UNREAD:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Progress status must be Correct or Incorrect")
 
+    # Demo / no-auth mode: the client generates its own user id, so auto-provision
+    # a placeholder user on first progress write instead of rejecting it. Replace
+    # this with real auth-backed users when authentication lands.
     user_exists = session.scalar(select(func.count()).select_from(User).where(User.id == payload.user_id))
     if not user_exists:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        ensure_user = (
+            insert(User)
+            .values(
+                id=payload.user_id,
+                email=f"{payload.user_id}@demo.pilotready.local",
+                password_hash="",
+            )
+            .on_conflict_do_nothing(index_elements=[User.id])
+        )
+        session.execute(ensure_user)
 
     question_exists = session.scalar(select(func.count()).select_from(Question).where(Question.id == payload.question_id))
     if not question_exists:
