@@ -136,31 +136,6 @@ export default function App() {
 
             {!loading && !error && (
               <>
-                {/* Mistakes review pool */}
-                <button
-                  type="button"
-                  disabled={totalMistakes === 0}
-                  onClick={() => setView({ kind: "study", source: { kind: "mistakes" } })}
-                  className={`mb-8 flex w-full items-center justify-between gap-4 rounded-3xl border p-5 text-left transition ${
-                    totalMistakes > 0
-                      ? "border-red-400/40 bg-red-500/10 hover:-translate-y-0.5 hover:border-red-300/70"
-                      : "cursor-default border-white/10 bg-slate-950/60"
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="grid h-12 w-12 place-items-center rounded-2xl bg-red-500/20 text-2xl">🔁</span>
-                    <div>
-                      <p className="text-lg font-bold text-white">{t("dashboard.mistakesCard")}</p>
-                      <p className="text-sm text-slate-300">
-                        {totalMistakes > 0 ? t("dashboard.mistakesCardCount", { n: totalMistakes }) : t("dashboard.mistakesCardEmpty")}
-                      </p>
-                    </div>
-                  </div>
-                  {totalMistakes > 0 && (
-                    <span className="rounded-2xl bg-red-400 px-5 py-3 text-sm font-bold text-slate-950">{t("dashboard.mistakesStart")}</span>
-                  )}
-                </button>
-
                 <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">{t("dashboard.subjectsHeading")}</h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {categories.map((category) => {
@@ -173,14 +148,7 @@ export default function App() {
                         onClick={() => setView({ kind: "study", source: { kind: "category", categoryId: category.id } })}
                         className="group flex flex-col rounded-3xl border border-white/10 bg-slate-950/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-300/60 hover:bg-cyan-300/5"
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-base font-semibold text-white">{t(`subject.${category.id}`)}</span>
-                          {category.incorrect > 0 && (
-                            <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-300">
-                              {category.incorrect} ✕
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-base font-semibold text-white">{t(`subject.${category.id}`)}</span>
                         <span className="mt-1 text-sm text-slate-400">{t("dashboard.questionsInBank", { n: category.total })}</span>
                         <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
                           <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all" style={{ width: `${percent}%` }} />
@@ -192,6 +160,46 @@ export default function App() {
                     );
                   })}
                 </div>
+
+                {/* Mistakes review — below the subjects, split per subject + an all-in-one option. */}
+                <section className="mt-10">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">{t("dashboard.mistakesCard")}</h2>
+                    {totalMistakes > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setView({ kind: "study", source: { kind: "mistakes" } })}
+                        className="rounded-2xl bg-red-400 px-5 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-red-300"
+                      >
+                        {t("dashboard.mistakesStart")} ({totalMistakes})
+                      </button>
+                    )}
+                  </div>
+
+                  {totalMistakes === 0 ? (
+                    <p className="rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-5 text-sm text-emerald-200">
+                      {t("dashboard.mistakesCardEmpty")}
+                    </p>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {categories
+                        .filter((category) => category.incorrect > 0)
+                        .map((category) => (
+                          <button
+                            key={`mistakes-${category.id}`}
+                            type="button"
+                            onClick={() => setView({ kind: "study", source: { kind: "mistakes", categoryId: category.id } })}
+                            className="flex items-center justify-between gap-3 rounded-2xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-red-300/60"
+                          >
+                            <span className="text-sm font-semibold text-white">{t(`subject.${category.id}`)}</span>
+                            <span className="shrink-0 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-bold text-red-300">
+                              {category.incorrect}
+                            </span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </section>
               </>
             )}
           </main>

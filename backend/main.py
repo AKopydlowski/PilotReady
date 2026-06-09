@@ -200,14 +200,19 @@ def get_questions(
 def get_mistakes(
     current_user_id: Annotated[uuid.UUID, Depends(get_logged_in_user_id)],
     session: Annotated[Session, Depends(get_session)],
+    category: Annotated[QuestionCategory | None, Query()] = None,
 ) -> list[QuestionResponse]:
-    """Every question the user has most recently answered incorrectly, across all
-    subjects — the pool that powers the 'review your mistakes' study mode."""
+    """Questions the user last answered incorrectly — the 'review your mistakes'
+    pool. Pass ?category= to drill a single subject's mistakes."""
+
+    filters = [UserProgress.user_id == current_user_id, UserProgress.status == ProgressStatus.INCORRECT]
+    if category is not None:
+        filters.append(Question.category == category)
 
     rows = session.execute(
         select(Question)
         .join(UserProgress, UserProgress.question_id == Question.id)
-        .where(UserProgress.user_id == current_user_id, UserProgress.status == ProgressStatus.INCORRECT)
+        .where(*filters)
         .order_by(Question.category.asc(), Question.source_row_number.asc().nullslast(), Question.external_id.asc())
     ).scalars().all()
 

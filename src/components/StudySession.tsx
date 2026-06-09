@@ -17,7 +17,9 @@ export type ApiQuestion = {
 
 type ShuffledAnswer = ApiAnswer & { isCorrect: boolean };
 
-export type StudySource = { kind: "category"; categoryId: string } | { kind: "mistakes" };
+export type StudySource =
+  | { kind: "category"; categoryId: string }
+  | { kind: "mistakes"; categoryId?: string };
 
 type StudySessionProps = {
   userId: string;
@@ -68,7 +70,10 @@ export function StudySession({ userId, source, apiBaseUrl = "", onExit }: StudyS
   const [sessionNumber, setSessionNumber] = useState(0);
   const [phase, setPhase] = useState<"answering" | "batchResult">("answering");
 
-  const fetchUrl = source.kind === "category" ? `${apiBaseUrl}/api/questions/${source.categoryId}` : `${apiBaseUrl}/api/mistakes`;
+  const fetchUrl =
+    source.kind === "category"
+      ? `${apiBaseUrl}/api/questions/${source.categoryId}`
+      : `${apiBaseUrl}/api/mistakes${source.categoryId ? `?category=${source.categoryId}` : ""}`;
 
   // ----- Load the question pool ---------------------------------------------
   useEffect(() => {
@@ -153,7 +158,12 @@ export function StudySession({ userId, source, apiBaseUrl = "", onExit }: StudyS
     }
   };
 
-  const heading = source.kind === "category" ? t(`subject.${source.categoryId}`) : t("study.mistakesHeading");
+  const heading =
+    source.kind === "category"
+      ? t(`subject.${source.categoryId}`)
+      : source.categoryId
+        ? t(`subject.${source.categoryId}`)
+        : t("study.mistakesHeading");
 
   // ----- Render -------------------------------------------------------------
   if (loading) {
