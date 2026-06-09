@@ -473,6 +473,26 @@ def extract_pdfminer_geometry_rows(lines: Sequence[PdfTextLine], page_width: flo
                         columns[3].append(split_parts[1])
                         continue
                 columns[column].append(line.text)
+
+        # Repair pdfminer answer-column merges: pdfminer occasionally emits ODP(n)
+        # and ODP(n+1) as a single LTTextLine separated by a wide internal gap,
+        # which leaves the neighbour column empty (e.g. ODP1 holds "okresowy.  na
+        # stałe." while ODP2 is blank). When an answer column is non-empty, its
+        # next neighbour is empty, and one of its lines carries a 2+ space gap,
+        # split that line and push the tail into the empty neighbour so all four
+        # ODP cells stay aligned to their own answer.
+        for answer_column in (3, 4, 5):
+            if not columns[answer_column] or columns[answer_column + 1]:
+                continue
+            for line_index, value in enumerate(columns[answer_column]):
+                if not re.search(r"\S\s{2,}\S", value):
+                    continue
+                head, tail = re.split(r"\s{2,}", value, maxsplit=1)
+                if head.strip() and tail.strip():
+                    columns[answer_column][line_index] = head.strip()
+                    columns[answer_column + 1].append(tail.strip())
+                    break
+
         cells = [clean_cell("\n".join(values)) for values in columns]
         if cells[1] and cells[2] and cells[3]:
             rows.append(ExtractedRow(cells, page_number, "pdfminer-geometry"))
