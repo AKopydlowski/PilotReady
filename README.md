@@ -202,22 +202,6 @@ nigdy nie trafią do repozytorium.** W repo leży tylko `.env.example` jako szab
 
 ---
 
-## 🩺 Drobne potknięcia (troubleshooting)
-
-- **`npm install` / `git push` zgłasza błąd certyfikatu SSL?**
-  Niektóre antywirusy i firewalle firmowe „prześwietlają" ruch HTTPS, przez co
-  npm i git nie ufają certyfikatowi. Najprościej:
-  ```bash
-  NODE_OPTIONS=--use-system-ca npm install     # npm korzysta z magazynu certów Windows
-  git -c http.sslBackend=schannel push         # git korzysta z natywnego Windows
-  ```
-- **`DATABASE_URL is required`?** Nie masz pliku `.env` albo nie ustawiłeś w nim
-  połączenia. Skopiuj `.env.example` → `.env` i uzupełnij.
-- **Egzamin „nie ma pytań"?** Najpierw odpal `seed_db.py` — baza musi być
-  wypełniona.
-
----
-
 ## ☁️ Hosting
 
 Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
@@ -228,9 +212,6 @@ Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
 | ⚙️ Backend (API) | [Render](https://render.com) | `pilotready-api.onrender.com` |
 | 🗄️ Baza | [Neon](https://neon.tech) | PostgreSQL w chmurze |
 
-Konfiguracja wdrożenia siedzi w repo: `render.yaml` (backend) i `vercel.json`
-(frontend). Sekrety (`DATABASE_URL`, `JWT_SECRET`) wpisuje się **tylko w panelach
-Render/Vercel** — nigdy do repozytorium.
 
 > ℹ️ Backend stoi na darmowym planie Render, więc po ~15 min bezczynności usypia —
 > pierwsze wejście po przerwie ładuje się ~50 s, potem śmiga normalnie.
@@ -238,9 +219,6 @@ Render/Vercel** — nigdy do repozytorium.
 ---
 
 ## 🗺️ Co dalej
-
-🟢 **Projekt jest online i działa** — [pilot-ready.vercel.app](https://pilot-ready.vercel.app).
-To na razie tyle 🎉 — w kolejnych krokach dojdzie jeszcze parę rzeczy:
 
 - 📱 **Aplikacja mobilna** — wkrótce.
 - ⚡ **Usprawnienia hostingu** — m.in. wybudzanie backendu (koniec z zimnym startem) i własna domena.
