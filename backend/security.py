@@ -41,6 +41,21 @@ logger = logging.getLogger("pilotready.security")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 7 days
 
+# Accounts with these emails get admin privileges (e.g. the support panel).
+# Configured via env so the list never lives in the repo; defaults to the
+# project owner's account.
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("ADMIN_EMAILS", "akkraofficialone@gmail.com").split(",")
+    if email.strip()
+}
+
+
+def is_admin_email(email: str | None) -> bool:
+    """True if the given email belongs to a configured admin account."""
+
+    return bool(email) and email.strip().lower() in ADMIN_EMAILS
+
 # The signing secret MUST be provided in production. For local development we
 # fall back to a random ephemeral secret and warn loudly — that keeps dev secure
 # by default (no hard-coded key) while still working out of the box; the only

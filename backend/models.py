@@ -121,8 +121,12 @@ class SupportReport(TimestampMixin, Base):
     __tablename__ = "support_reports"
     __table_args__ = (
         CheckConstraint("kind in ('BUG', 'SUGGESTION', 'OTHER')", name="support_reports_kind_valid"),
+        CheckConstraint(
+            "status in ('NEW', 'IN_PROGRESS', 'RESOLVED', 'REJECTED')", name="support_reports_status_valid"
+        ),
         CheckConstraint("char_length(message) between 1 and 4000", name="support_reports_message_length"),
         Index("support_reports_user_created_idx", "user_id", "created_at"),
+        Index("support_reports_status_idx", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -130,6 +134,8 @@ class SupportReport(TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="BUG")
+    # Triage state managed by an admin: NEW -> IN_PROGRESS -> RESOLVED / REJECTED.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="NEW")
     message: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional technical context (e.g. browser user-agent) to help reproduce.
     context: Mapped[str | None] = mapped_column(String(400), nullable=True)

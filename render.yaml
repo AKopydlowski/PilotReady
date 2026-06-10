@@ -28,5 +28,8 @@ services:
       # Set this to your deployed frontend origin (your Vercel URL).
       - key: CORS_ORIGINS
         sync: false
+      # Comma-separated admin emails (support panel access).
+      - key: ADMIN_EMAILS
+        value: akkraofficialone@gmail.com
       - key: PYTHON_VERSION
         value: "3.11.9"

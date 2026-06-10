@@ -87,6 +87,21 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
   przypisane do konta.
 - Pod formularzem widzisz **historię swoich zgłoszeń** (typ, treść, data).
 
+### 🛠️ Panel admina
+- Osobna zakładka **Admin** widoczna **wyłącznie dla konta administratora**
+  (lista e-maili w zmiennej `ADMIN_EMAILS`).
+- Admin widzi **wszystkie zgłoszenia** użytkowników (z e-mailem autora), filtruje
+  po statusie i przestawia każde między **Nowe → W trakcie → Rozwiązane /
+  Odrzucone**.
+
+### 🛡️ Zabezpieczenia
+- Hasła hashowane **bcrypt**, sesje na podpisanych **JWT**, sekrety tylko w env.
+- **Rate limiting** (anty-spam / anty-flood): twardsze limity na logowanie,
+  rejestrację i wysyłkę zgłoszeń + dzienny limit zgłoszeń na konto.
+- Pełna ochrona przed wolumetrycznym **DDoS** to warstwa sieciowa (CDN/WAF, np.
+  Cloudflare przed domeną) — rate limiting chroni przed nadużyciem ruchu, nie
+  zastępuje CDN-a.
+
 ---
 
 ## 🧱 Jak to jest zbudowane
@@ -110,8 +125,10 @@ PilotReady/
 ├── backend/
 │   ├── main.py        # API: kategorie, pytania, postęp nauki
 │   ├── auth.py        # API kont: /api/auth/register, /login, /me
-│   ├── security.py    # hashowanie haseł (bcrypt) + tokeny sesji (JWT)
+│   ├── security.py    # hashowanie haseł (bcrypt) + JWT + role admina
+│   ├── ratelimit.py   # rate limiting (anty-spam / anty-flood)
 │   ├── support.py     # API zgłoszeń: /api/support (+ /mine)
+│   ├── admin.py       # panel admina: /api/admin/support (lista + status)
 │   ├── exam.py        # API egzaminu: /api/exam/start i /api/exam/submit
 │   ├── database.py    # konfiguracja bazy (czyta .env)
 │   └── models.py      # modele SQLAlchemy
@@ -128,7 +145,8 @@ PilotReady/
 │       ├── AuthScreen.tsx    # ekran logowania / rejestracji
 │       ├── StudySession.tsx  # tryb nauki — sesje po 10 (też powtórka błędów)
 │       ├── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
-│       └── SupportView.tsx   # zakładka Pomoc — zgłaszanie błędów
+│       ├── SupportView.tsx   # zakładka Pomoc — zgłaszanie błędów
+│       └── AdminView.tsx     # panel admina — zarządzanie zgłoszeniami
 ├── database/schema.sql
 ├── render.yaml               # deploy backendu (Render)
 ├── vercel.json               # deploy frontendu (Vercel)

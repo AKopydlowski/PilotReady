@@ -10,6 +10,7 @@ import StudySession, { type StudySource } from "./components/StudySession";
 import ExamView from "./components/ExamView";
 import AuthScreen from "./components/AuthScreen";
 import SupportView from "./components/SupportView";
+import AdminView from "./components/AdminView";
 import { apiJson } from "./api";
 import { useAuth } from "./auth";
 import { useI18n, type Lang } from "./i18n";
@@ -23,7 +24,12 @@ type Category = {
   unattempted: number;
 };
 
-type View = { kind: "dashboard" } | { kind: "study"; source: StudySource } | { kind: "exam" } | { kind: "support" };
+type View =
+  | { kind: "dashboard" }
+  | { kind: "study"; source: StudySource }
+  | { kind: "exam" }
+  | { kind: "support" }
+  | { kind: "admin" };
 
 function LanguageToggle() {
   const { lang, setLang } = useI18n();
@@ -116,6 +122,17 @@ export default function App() {
             >
               {t("nav.support")}
             </button>
+            {user.is_admin && (
+              <button
+                type="button"
+                onClick={() => setView({ kind: "admin" })}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                  view.kind === "admin" ? "bg-amber-300 text-slate-950" : "bg-amber-300/10 text-amber-200 hover:bg-amber-300/20"
+                }`}
+              >
+                {t("nav.admin")}
+              </button>
+            )}
             <LanguageToggle />
             <div className="ml-1 flex items-center gap-2 border-l border-white/10 pl-3">
               <span className="hidden max-w-[12rem] truncate text-xs text-slate-400 sm:block" title={user.email}>
@@ -135,6 +152,8 @@ export default function App() {
         {view.kind === "exam" && <ExamView onExit={() => setView({ kind: "dashboard" })} />}
 
         {view.kind === "support" && <SupportView />}
+
+        {view.kind === "admin" && user.is_admin && <AdminView />}
 
         {view.kind === "study" && (
           <div>

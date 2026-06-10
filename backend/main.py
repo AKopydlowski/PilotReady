@@ -18,14 +18,19 @@ from typing import Annotated, Any, AsyncIterator
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from backend.admin import router as admin_router
 from backend.auth import router as auth_router
 from backend.database import engine, get_session
 from backend.exam import router as exam_router
 from backend.models import Base, ProgressStatus, Question, QuestionCategory, UserProgress
+from backend.ratelimit import limiter
 from backend.security import get_current_user_id
 from backend.support import router as support_router
 
@@ -56,6 +61,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="PilotReady API", version="0.1.0", lifespan=lifespan)
+
+# Rate limiting (anti-spam / anti-abuse). Register the limiter + 429 handler, and
+# add SlowAPIMiddleware BEFORE CORS so the CORS middleware stays outermost and
+# still attaches its headers to throttled (429) responses.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")],
@@ -65,6 +77,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(support_router)
+app.include_router(admin_router)
 app.include_router(exam_router)
 
 

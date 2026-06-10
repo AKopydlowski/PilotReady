@@ -15,21 +15,25 @@ user see their own past submissions.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.database import get_session
 from backend.models import SupportReport
+from backend.ratelimit import limiter
 from backend.security import get_current_user_id
 
 router = APIRouter(prefix="/api/support", tags=["support"])
 
 SupportKind = Literal["BUG", "SUGGESTION", "OTHER"]
+
+# Anti-spam: at most this many reports per user per rolling hour.
+MAX_REPORTS_PER_USER_PER_HOUR = 15
 
 
 class SupportCreateRequest(BaseModel):
@@ -60,11 +64,27 @@ class SupportReportResponse(BaseModel):
 
 
 @router.post("", response_model=SupportReportResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/hour")
 def create_report(
+    request: Request,
     payload: SupportCreateRequest,
     current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     session: Annotated[Session, Depends(get_session)],
 ) -> SupportReportResponse:
+    # Per-account anti-spam cap (independent of the per-IP limiter above): block a
+    # single logged-in user from flooding reports regardless of their network.
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent = session.scalar(
+        select(func.count())
+        .select_from(SupportReport)
+        .where(SupportReport.user_id == current_user_id, SupportReport.created_at >= one_hour_ago)
+    )
+    if recent and recent >= MAX_REPORTS_PER_USER_PER_HOUR:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many reports submitted recently. Please try again later.",
+        )
+
     report = SupportReport(
         user_id=current_user_id,
         kind=payload.kind,

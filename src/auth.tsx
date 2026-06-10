@@ -12,6 +12,7 @@ export type User = {
   id: string;
   email: string;
   display_name: string | null;
+  is_admin: boolean;
 };
 
 type AuthResponse = {

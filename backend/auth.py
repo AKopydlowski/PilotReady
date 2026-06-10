@@ -18,17 +18,19 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.database import get_session
 from backend.models import User
+from backend.ratelimit import limiter
 from backend.security import (
     create_access_token,
     get_current_user_id,
     hash_password,
+    is_admin_email,
     verify_password,
 )
 
@@ -54,6 +56,7 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     email: EmailStr
     display_name: str | None = None
+    is_admin: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -62,11 +65,25 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 
+def _user_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        is_admin=is_admin_email(user.email),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, session: Annotated[Session, Depends(get_session)]) -> AuthResponse:
+@limiter.limit("5/minute")
+def register(
+    request: Request,
+    payload: RegisterRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> AuthResponse:
     email = payload.email.strip().lower()
 
     existing = session.scalar(select(User).where(User.email == email))
@@ -82,14 +99,16 @@ def register(payload: RegisterRequest, session: Annotated[Session, Depends(get_s
     session.commit()
     session.refresh(user)
 
-    return AuthResponse(
-        access_token=create_access_token(user.id),
-        user=UserResponse(id=user.id, email=user.email, display_name=user.display_name),
-    )
+    return AuthResponse(access_token=create_access_token(user.id), user=_user_response(user))
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: LoginRequest, session: Annotated[Session, Depends(get_session)]) -> AuthResponse:
+@limiter.limit("10/minute")
+def login(
+    request: Request,
+    payload: LoginRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> AuthResponse:
     email = payload.email.strip().lower()
     user = session.scalar(select(User).where(User.email == email))
 
@@ -99,10 +118,7 @@ def login(payload: LoginRequest, session: Annotated[Session, Depends(get_session
     if user is None or not user.password_hash or not password_ok:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    return AuthResponse(
-        access_token=create_access_token(user.id),
-        user=UserResponse(id=user.id, email=user.email, display_name=user.display_name),
-    )
+    return AuthResponse(access_token=create_access_token(user.id), user=_user_response(user))
 
 
 @router.get("/me", response_model=UserResponse)
@@ -113,4 +129,4 @@ def me(
     user = session.get(User, current_user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
-    return UserResponse(id=user.id, email=user.email, display_name=user.display_name)
+    return _user_response(user)
