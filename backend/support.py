@@ -35,6 +35,9 @@ SupportKind = Literal["BUG", "SUGGESTION", "OTHER"]
 # Anti-spam: at most this many reports per user per rolling hour.
 MAX_REPORTS_PER_USER_PER_HOUR = 15
 
+# How long after submitting a user may still cancel (withdraw) their own report.
+CANCEL_WINDOW_MINUTES = 10
+
 
 class SupportCreateRequest(BaseModel):
     kind: SupportKind = "BUG"
@@ -56,6 +59,7 @@ class SupportCreateRequest(BaseModel):
 class SupportReportResponse(BaseModel):
     id: uuid.UUID
     kind: str
+    status: str
     message: str
     context: str | None
     created_at: datetime
@@ -108,3 +112,30 @@ def my_reports(
         .order_by(SupportReport.created_at.desc())
     ).all()
     return [SupportReportResponse.model_validate(row) for row in rows]
+
+
+@router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_report(
+    report_id: uuid.UUID,
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    session: Annotated[Session, Depends(get_session)],
+) -> None:
+    """Let a user withdraw their own report within CANCEL_WINDOW_MINUTES.
+
+    Uses 404 for both "not found" and "not yours" so a user cannot probe other
+    people's report ids.
+    """
+
+    report = session.get(SupportReport, report_id)
+    if report is None or report.user_id != current_user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+
+    age = datetime.now(timezone.utc) - report.created_at
+    if age > timedelta(minutes=CANCEL_WINDOW_MINUTES):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Reports can only be cancelled within {CANCEL_WINDOW_MINUTES} minutes.",
+        )
+
+    session.delete(report)
+    session.commit()

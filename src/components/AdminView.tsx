@@ -5,8 +5,8 @@
 //
 // NOTE: licensing stub - to be reviewed/refined later.
 
-import { useCallback, useEffect, useState } from "react";
-import { apiJson } from "../api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiFetch, apiJson } from "../api";
 import { useI18n } from "../i18n";
 
 type SupportStatus = "NEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
@@ -57,6 +57,8 @@ export default function AdminView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(
     (status: SupportStatus | "ALL") => {
@@ -73,7 +75,56 @@ export default function AdminView() {
 
   useEffect(() => {
     load(filter);
+    setSelected(new Set()); // selection doesn't carry across filters
   }, [filter, load]);
+
+  const visibleIds = useMemo(() => (data?.items ?? []).map((it) => it.id), [data]);
+
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const selectAllVisible = () => setSelected(new Set(visibleIds));
+  const clearSelection = () => setSelected(new Set());
+
+  const deleteReport = async (report: AdminReport) => {
+    if (!window.confirm(t("admin.deleteConfirm"))) return;
+    setUpdatingId(report.id);
+    setError(null);
+    try {
+      await apiFetch(`/api/admin/support/${report.id}`, { method: "DELETE" });
+      load(filter);
+      clearSelection();
+    } catch {
+      setError(t("admin.actionError"));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const runBulk = async (action: "set_status" | "delete", status?: SupportStatus) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (action === "delete" && !window.confirm(t("admin.bulkDeleteConfirm", { n: ids.length }))) return;
+    setBulkBusy(true);
+    setError(null);
+    try {
+      await apiJson<{ affected: number }>("/api/admin/support/bulk", {
+        method: "POST",
+        body: JSON.stringify(action === "set_status" ? { ids, action, status } : { ids, action }),
+      });
+      load(filter);
+      clearSelection();
+    } catch {
+      setError(t("admin.actionError"));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const changeStatus = async (report: AdminReport, status: SupportStatus) => {
     if (report.status === status) return;
@@ -148,6 +199,47 @@ export default function AdminView() {
         ))}
       </div>
 
+      {/* Select-visible / clear helpers */}
+      {data && data.items.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+          <button type="button" onClick={selectAllVisible} className="rounded-lg border border-white/10 px-3 py-1.5 font-semibold text-slate-300 hover:border-cyan-300/40">
+            {t("admin.selectAll")}
+          </button>
+          {selected.size > 0 && (
+            <button type="button" onClick={clearSelection} className="rounded-lg border border-white/10 px-3 py-1.5 font-semibold text-slate-300 hover:border-cyan-300/40">
+              {t("admin.clearSelection")}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-cyan-300/30 bg-slate-900/90 p-3 shadow-lg shadow-black/40 backdrop-blur">
+          <span className="mr-1 text-sm font-bold text-cyan-200">{t("admin.selected", { n: selected.size })}</span>
+          <span className="text-[11px] uppercase tracking-wider text-slate-500">{t("admin.bulkSetStatus")}</span>
+          {STATUSES.map((status) => (
+            <button
+              key={status}
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => runBulk("set_status", status)}
+              className={classNames("rounded-xl border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50", STATUS_STYLE[status])}
+            >
+              {t(`admin.status.${status}`)}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => runBulk("delete")}
+            className="ml-auto rounded-xl border border-red-400/50 px-3 py-1.5 text-xs font-bold text-red-200 transition hover:bg-red-500/15 disabled:opacity-50"
+          >
+            {t("admin.bulkDelete")}
+          </button>
+        </div>
+      )}
+
       {error && <p className="mb-4 rounded-2xl border border-red-900/70 bg-red-950/40 px-4 py-3 text-sm text-red-100">{error}</p>}
 
       {loading ? (
@@ -157,9 +249,22 @@ export default function AdminView() {
       ) : (
         <ul className="grid gap-3">
           {data.items.map((report) => (
-            <li key={report.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-5">
+            <li
+              key={report.id}
+              className={classNames(
+                "rounded-2xl border bg-slate-950/50 p-5 transition",
+                selected.has(report.id) ? "border-cyan-300/50 ring-1 ring-cyan-300/30" : "border-white/10",
+              )}
+            >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(report.id)}
+                    onChange={() => toggleSelect(report.id)}
+                    className="h-4 w-4 cursor-pointer accent-cyan-400"
+                    aria-label="select report"
+                  />
                   <span className={classNames("rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider", KIND_STYLE[report.kind])}>
                     {t(`support.kind.${report.kind}`)}
                   </span>
@@ -194,6 +299,14 @@ export default function AdminView() {
                     {t(`admin.status.${status}`)}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  disabled={updatingId === report.id}
+                  onClick={() => deleteReport(report)}
+                  className="ml-auto rounded-xl border border-red-400/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  {t("admin.delete")}
+                </button>
               </div>
             </li>
           ))}

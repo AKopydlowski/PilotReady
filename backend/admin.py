@@ -19,8 +19,8 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from backend.database import get_session
@@ -70,6 +70,22 @@ class AdminSupportListResponse(BaseModel):
 
 class StatusUpdateRequest(BaseModel):
     status: SupportStatus
+
+
+class BulkActionRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+    action: Literal["set_status", "delete"]
+    status: SupportStatus | None = None
+
+    @model_validator(mode="after")
+    def status_required_for_set(self) -> "BulkActionRequest":
+        if self.action == "set_status" and self.status is None:
+            raise ValueError("status is required when action is 'set_status'")
+        return self
+
+
+class BulkActionResponse(BaseModel):
+    affected: int
 
 
 # --------------------------------------------------------------------------- #
@@ -147,3 +163,38 @@ def update_report_status(
         user_email=author.email if author else "",
         user_display_name=author.display_name if author else None,
     )
+
+
+@router.delete("/support/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report(
+    report_id: uuid.UUID,
+    _admin: Annotated[User, Depends(get_admin_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> None:
+    """Hard-delete a report. It disappears for the reporting user too."""
+
+    report = session.get(SupportReport, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    session.delete(report)
+    session.commit()
+
+
+@router.post("/support/bulk", response_model=BulkActionResponse)
+def bulk_action(
+    payload: BulkActionRequest,
+    _admin: Annotated[User, Depends(get_admin_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> BulkActionResponse:
+    """Apply an action (set status, or delete) to several reports at once."""
+
+    if payload.action == "delete":
+        result = session.execute(delete(SupportReport).where(SupportReport.id.in_(payload.ids)))
+    else:  # set_status (status presence enforced by the request validator)
+        result = session.execute(
+            update(SupportReport)
+            .where(SupportReport.id.in_(payload.ids))
+            .values(status=payload.status, updated_at=func.now())
+        )
+    session.commit()
+    return BulkActionResponse(affected=result.rowcount or 0)

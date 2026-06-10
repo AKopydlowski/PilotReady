@@ -85,7 +85,10 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 - Zakładka **Pomoc** — zalogowany użytkownik może zgłosić **błąd**, **sugestię**
   lub **inne**, opisując problem. Każde zgłoszenie trafia do bazy i jest
   przypisane do konta.
-- Pod formularzem widzisz **historię swoich zgłoszeń** (typ, treść, data).
+- Pod formularzem widzisz **historię swoich zgłoszeń** wraz z **aktualnym
+  statusem** (Nowe / W trakcie / Rozwiązane / Odrzucone).
+- **Anulowanie do 10 minut** — świeżo wysłane zgłoszenie możesz wycofać; znika
+  wtedy zupełnie (także adminowi).
 
 ### 🛠️ Panel admina
 - Osobna zakładka **Admin** widoczna **wyłącznie dla konta administratora**
@@ -93,6 +96,8 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 - Admin widzi **wszystkie zgłoszenia** użytkowników (z e-mailem autora), filtruje
   po statusie i przestawia każde między **Nowe → W trakcie → Rozwiązane /
   Odrzucone**.
+- **Zaznaczanie wielu naraz** — hurtowa zmiana statusu albo usunięcie zaznaczonych.
+- **Usunięcie zgłoszenia** kasuje je na dobre — znika również użytkownikowi.
 
 ### 🛡️ Zabezpieczenia
 - Hasła hashowane **bcrypt**, sesje na podpisanych **JWT**, sekrety tylko w env.

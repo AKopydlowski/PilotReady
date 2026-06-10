@@ -6,14 +6,16 @@
 // NOTE: licensing stub - to be reviewed/refined later.
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ApiError, apiJson } from "../api";
+import { ApiError, apiFetch, apiJson } from "../api";
 import { useI18n } from "../i18n";
 
 type SupportKind = "BUG" | "SUGGESTION" | "OTHER";
+type SupportStatus = "NEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
 
 type SupportReport = {
   id: string;
   kind: SupportKind;
+  status: SupportStatus;
   message: string;
   context: string | null;
   created_at: string;
@@ -21,6 +23,14 @@ type SupportReport = {
 
 const KINDS: SupportKind[] = ["BUG", "SUGGESTION", "OTHER"];
 const MAX_LEN = 4000;
+const CANCEL_WINDOW_MS = 10 * 60 * 1000;
+
+const STATUS_STYLE: Record<SupportStatus, string> = {
+  NEW: "border-cyan-300/40 bg-cyan-300/15 text-cyan-200",
+  IN_PROGRESS: "border-amber-300/40 bg-amber-400/15 text-amber-200",
+  RESOLVED: "border-emerald-400/40 bg-emerald-400/15 text-emerald-200",
+  REJECTED: "border-red-400/40 bg-red-500/15 text-red-300",
+};
 
 function classNames(...names: Array<string | false | null | undefined>) {
   return names.filter(Boolean).join(" ");
@@ -36,6 +46,14 @@ export default function SupportView() {
 
   const [reports, setReports] = useState<SupportReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  // Ticks every 20s so the 10-minute "cancel" window closes on its own.
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const handle = window.setInterval(() => setNow(Date.now()), 20_000);
+    return () => window.clearInterval(handle);
+  }, []);
 
   const loadReports = () => {
     setLoadingReports(true);
@@ -89,6 +107,21 @@ export default function SupportView() {
       setSubmitting(false);
     }
   };
+
+  const cancelReport = async (id: string) => {
+    setCancellingId(id);
+    setError(null);
+    try {
+      await apiFetch(`/api/support/${id}`, { method: "DELETE" });
+      setReports((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      setError(t("support.cancelError"));
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const canCancel = (report: SupportReport) => now - new Date(report.created_at).getTime() < CANCEL_WINDOW_MS;
 
   const formatDate = (iso: string) => {
     try {
@@ -178,22 +211,45 @@ export default function SupportView() {
           <ul className="grid gap-3">
             {reports.map((report) => (
               <li key={report.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span
-                    className={classNames(
-                      "rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider",
-                      report.kind === "BUG"
-                        ? "bg-red-500/15 text-red-300"
-                        : report.kind === "SUGGESTION"
-                          ? "bg-cyan-300/15 text-cyan-200"
-                          : "bg-white/10 text-slate-300",
-                    )}
-                  >
-                    {t(`support.kind.${report.kind}`)}
-                  </span>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={classNames(
+                        "rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider",
+                        report.kind === "BUG"
+                          ? "bg-red-500/15 text-red-300"
+                          : report.kind === "SUGGESTION"
+                            ? "bg-cyan-300/15 text-cyan-200"
+                            : "bg-white/10 text-slate-300",
+                      )}
+                    >
+                      {t(`support.kind.${report.kind}`)}
+                    </span>
+                    <span
+                      className={classNames(
+                        "rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wider",
+                        STATUS_STYLE[report.status],
+                      )}
+                    >
+                      {t(`support.status.${report.status}`)}
+                    </span>
+                  </div>
                   <span className="text-xs text-slate-500">{t("support.sentAt", { date: formatDate(report.created_at) })}</span>
                 </div>
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{report.message}</p>
+                {canCancel(report) && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/10 pt-3">
+                    <button
+                      type="button"
+                      disabled={cancellingId === report.id}
+                      onClick={() => cancelReport(report.id)}
+                      className="rounded-xl border border-red-400/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition hover:bg-red-500/10 disabled:opacity-50"
+                    >
+                      {t("support.cancel")}
+                    </button>
+                    <span className="text-[11px] text-slate-500">{t("support.cancelHint")}</span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
