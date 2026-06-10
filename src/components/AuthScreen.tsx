@@ -1,3 +1,10 @@
+// PilotReady
+// Copyright (c) 2026 PilotReady. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE.
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+//
+// NOTE: licensing stub - to be reviewed/refined later.
+
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../api";
 import { useAuth } from "../auth";

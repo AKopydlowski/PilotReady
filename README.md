@@ -227,7 +227,14 @@ Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
 
 ## 📄 Licencja
 
-Projekt na licencji **MIT** — patrz [LICENSE](LICENSE).
+**PolyForm Noncommercial License 1.0.0** — _Copyright (c) 2026 PilotReady. All rights reserved._
+
+Krótko: możesz używać, uczyć się i rozwijać projekt **do celów niekomercyjnych**
+(nauka własna, badania, projekty hobbystyczne, instytucje edukacyjne itd.).
+**Użycie komercyjne jest wykluczone.** Pełne warunki w pliku [LICENSE](LICENSE).
+
+> ℹ️ Nagłówki licencyjne w plikach źródłowych to na razie **wersja wstępna (stub)**
+> — zostaną jeszcze dopracowane (m.in. właściwy podmiot praw autorskich).
 
 ---
 

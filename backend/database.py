@@ -1,3 +1,10 @@
+# PilotReady
+# Copyright (c) 2026 PilotReady. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE.
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+#
+# NOTE: licensing stub - to be reviewed/refined later.
+
 """Centralized database configuration for PilotReady.
 
 Loads environment variables from the project-root ``.env`` file via

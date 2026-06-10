@@ -1,3 +1,10 @@
+# PilotReady
+# Copyright (c) 2026 PilotReady. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE.
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+#
+# NOTE: licensing stub - to be reviewed/refined later.
+
 """SQLAlchemy models for the PPL(A) learning/exam REST API.
 
 These models mirror `database/schema.sql` and the JSON emitted by

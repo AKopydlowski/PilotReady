@@ -1,3 +1,10 @@
+// PilotReady
+// Copyright (c) 2026 PilotReady. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE.
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+//
+// NOTE: licensing stub - to be reviewed/refined later.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiJson } from "../api";
 import { useI18n } from "../i18n";
