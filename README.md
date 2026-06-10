@@ -93,11 +93,6 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 ### 🛠️ Panel admina
 - Osobna zakładka **Admin** widoczna **wyłącznie dla konta administratora**
   (lista e-maili w zmiennej `ADMIN_EMAILS`).
-- Admin widzi **wszystkie zgłoszenia** użytkowników (z e-mailem autora), filtruje
-  po statusie i przestawia każde między **Nowe → W trakcie → Rozwiązane /
-  Odrzucone**.
-- **Zaznaczanie wielu naraz** — hurtowa zmiana statusu albo usunięcie zaznaczonych.
-- **Usunięcie zgłoszenia** kasuje je na dobre — znika również użytkownikowi.
 
 ### 🛡️ Zabezpieczenia
 - Hasła hashowane **bcrypt**, sesje na podpisanych **JWT**, sekrety tylko w env.
