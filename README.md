@@ -2,6 +2,8 @@
 
 **Twój cyfrowy instruktor do egzaminu teoretycznego PPL(A).**
 
+### 🟢 Aplikacja działa online → **[pilot-ready.vercel.app](https://pilot-ready.vercel.app)**
+
 PilotReady to aplikacja webowa, która pomaga przyszłym pilotom przygotować się
 do egzaminu na licencję turystyczną samolotową (PPL(A)) przed Urzędem Lotnictwa
 Cywilnego. Cały oficjalny bank **2053 pytań** masz w jednym miejscu — możesz się
@@ -216,43 +218,32 @@ nigdy nie trafią do repozytorium.** W repo leży tylko `.env.example` jako szab
 
 ---
 
-## ☁️ Wrzucenie online (Render + Vercel)
+## ☁️ Hosting
 
-Aplikacja jest gotowa do publikacji jako strona: **backend na Render**, **frontend
-na Vercel**, baza w **Neon**. Wszystko na darmowych planach.
+Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
 
-### 1. Baza (Neon)
-Załóż projekt w [Neon](https://neon.tech), skopiuj connection string. Zaseeduj
-bazę **raz**, lokalnie (z tym `DATABASE_URL` w swoim `.env`):
+| Warstwa | Gdzie | Adres |
+|---|---|---|
+| 🖥️ Frontend | [Vercel](https://vercel.com) | **[pilot-ready.vercel.app](https://pilot-ready.vercel.app)** |
+| ⚙️ Backend (API) | [Render](https://render.com) | `pilotready-api.onrender.com` |
+| 🗄️ Baza | [Neon](https://neon.tech) | PostgreSQL w chmurze |
 
-```bash
-python scripts/seed_db.py
-```
+Konfiguracja wdrożenia siedzi w repo: `render.yaml` (backend) i `vercel.json`
+(frontend). Sekrety (`DATABASE_URL`, `JWT_SECRET`) wpisuje się **tylko w panelach
+Render/Vercel** — nigdy do repozytorium.
 
-### 2. Backend (Render)
-W [Render](https://render.com) wybierz **New + → Blueprint** i wskaż to repo —
-Render odczyta `render.yaml`. Ustaw zmienne (sekrety):
-- `DATABASE_URL` — connection string z Neona,
-- `CORS_ORIGINS` — adres frontendu z Vercela (np. `https://pilotready.vercel.app`),
-- `JWT_SECRET` — Render wygeneruje go sam (`generateValue: true`).
-
-Po deployu API żyje pod `https://twoja-nazwa.onrender.com` (health: `/healthz`).
-
-### 3. Frontend (Vercel)
-W [Vercel](https://vercel.com) zaimportuj repo (wykryje Vite i `vercel.json`).
-Dodaj zmienną środowiskową:
-- `VITE_API_URL` — publiczny URL backendu z Rendera.
-
-Deploy → gotowe. Pamiętaj, żeby adres Vercela dopisać do `CORS_ORIGINS` na Render.
-
-> Kolejność: **Neon → Render → Vercel**, a na końcu uzupełnij `CORS_ORIGINS`
-> adresem Vercela. Sekrety wpisujesz tylko w panelach Render/Vercel — nigdy do repo.
+> ℹ️ Backend stoi na darmowym planie Render, więc po ~15 min bezczynności usypia —
+> pierwsze wejście po przerwie ładuje się ~50 s, potem śmiga normalnie.
 
 ---
 
 ## 🗺️ Co dalej
 
+🟢 **Projekt jest online i działa** — [pilot-ready.vercel.app](https://pilot-ready.vercel.app).
+To na razie tyle 🎉 — w kolejnych krokach dojdzie jeszcze parę rzeczy:
+
 - 📱 **Aplikacja mobilna** — wkrótce.
+- ⚡ **Usprawnienia hostingu** — m.in. wybudzanie backendu (koniec z zimnym startem) i własna domena.
 
 ---
 
