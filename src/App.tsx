@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import StudySession, { type StudySource } from "./components/StudySession";
 import ExamView from "./components/ExamView";
+import AuthScreen from "./components/AuthScreen";
+import { apiJson } from "./api";
+import { useAuth } from "./auth";
 import { useI18n, type Lang } from "./i18n";
 
 type Category = {
@@ -13,19 +16,6 @@ type Category = {
 };
 
 type View = { kind: "dashboard" } | { kind: "study"; source: StudySource } | { kind: "exam" };
-
-// A stable demo user id so learning progress persists across reloads. A real
-// build would obtain this from authentication.
-function useDemoUserId(): string {
-  return useMemo(() => {
-    const key = "pilotready:demo-user-id";
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    const fresh = crypto.randomUUID();
-    window.localStorage.setItem(key, fresh);
-    return fresh;
-  }, []);
-}
 
 function LanguageToggle() {
   const { lang, setLang } = useI18n();
@@ -48,32 +38,36 @@ function LanguageToggle() {
 }
 
 export default function App() {
-  const userId = useDemoUserId();
   const { t } = useI18n();
+  const { user, loading: authLoading, logout } = useAuth();
   const [view, setView] = useState<View>({ kind: "dashboard" });
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (view.kind !== "dashboard") return;
-    const controller = new AbortController();
+    if (!user || view.kind !== "dashboard") return;
     setLoading(true);
     setError(null);
-    fetch("/api/categories", { headers: { "X-User-Id": userId }, signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(t("dashboard.error", { status: response.status }));
-        return response.json() as Promise<Category[]>;
-      })
+    apiJson<Category[]>("/api/categories")
       .then(setCategories)
-      .catch((fetchError: Error) => {
-        if (fetchError.name !== "AbortError") setError(fetchError.message);
-      })
+      .catch((fetchError: Error) => setError(fetchError.message))
       .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [userId, view.kind, t]);
+  }, [user, view.kind]);
 
   const totalMistakes = useMemo(() => categories.reduce((sum, category) => sum + category.incorrect, 0), [categories]);
+
+  // While we validate a stored token, show a neutral splash.
+  if (authLoading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-950 text-slate-400">
+        <p className="text-sm uppercase tracking-[0.35em] text-cyan-300">{t("auth.loading")}</p>
+      </div>
+    );
+  }
+
+  // Not logged in → the auth gate. Nothing behind it is reachable.
+  if (!user) return <AuthScreen />;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.08),_transparent_45%)] px-4 py-6 md:px-8">
@@ -106,6 +100,18 @@ export default function App() {
               {t("nav.exam")}
             </button>
             <LanguageToggle />
+            <div className="ml-1 flex items-center gap-2 border-l border-white/10 pl-3">
+              <span className="hidden max-w-[12rem] truncate text-xs text-slate-400 sm:block" title={user.email}>
+                {user.display_name || user.email}
+              </span>
+              <button
+                type="button"
+                onClick={logout}
+                className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-red-400/50 hover:text-red-200"
+              >
+                {t("nav.logout")}
+              </button>
+            </div>
           </div>
         </nav>
 
@@ -120,7 +126,7 @@ export default function App() {
             >
               {t("learn.back")}
             </button>
-            <StudySession userId={userId} source={view.source} onExit={() => setView({ kind: "dashboard" })} />
+            <StudySession source={view.source} onExit={() => setView({ kind: "dashboard" })} />
           </div>
         )}
 

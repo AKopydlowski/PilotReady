@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_session
 from backend.models import Question, QuestionCategory
+from backend.security import get_current_user_id
 
 router = APIRouter(prefix="/api/exam", tags=["exam"])
 
@@ -173,7 +174,10 @@ def _shuffled_options(question: Question) -> list[ExamAnswerOption]:
 # Routes
 # --------------------------------------------------------------------------- #
 @router.post("/start", response_model=ExamStartResponse)
-def start_exam(session: Annotated[Session, Depends(get_session)]) -> ExamStartResponse:
+def start_exam(
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    session: Annotated[Session, Depends(get_session)],
+) -> ExamStartResponse:
     """Assemble a fresh, randomized, balanced ULC exam per the official blueprint."""
 
     sections: list[ExamSection] = []
@@ -226,6 +230,7 @@ def start_exam(session: Annotated[Session, Depends(get_session)]) -> ExamStartRe
 @router.post("/submit", response_model=ExamSubmitResponse)
 def submit_exam(
     payload: ExamSubmitRequest,
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     session: Annotated[Session, Depends(get_session)],
 ) -> ExamSubmitResponse:
     """Grade a submitted exam against the canonical answers in the database.

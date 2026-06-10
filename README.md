@@ -39,6 +39,17 @@ zbliżonych do prawdziwych: z zegarem, limitami czasu i progiem zaliczenia.
 - Przełącznik **PL / EN** w nagłówku zmienia cały interfejs; wybór jest
   zapamiętywany. Nazwy przedmiotów też się lokalizują.
 
+### 👤 Konta użytkowników
+- **Rejestracja i logowanie** e-mailem i hasłem. Twój postęp i błędy są
+  przypisane do konta, więc wracasz dokładnie tam, gdzie skończyłeś — na każdym
+  urządzeniu.
+- **Hasła są hashowane bcryptem** (nigdy nie trafiają do bazy jawnym tekstem),
+  a sesja to **podpisany token (JWT)** — serwer ufa tylko tokenowi z poprawnym
+  podpisem, więc nikt nie podszyje się pod kogoś innego.
+- Sekret podpisujący (`JWT_SECRET`) i dane bazy żyją **wyłącznie w zmiennych
+  środowiskowych** — nigdy w repozytorium. W produkcji ruch idzie po HTTPS
+  (Render i Vercel same obsługują TLS), więc hasła i tokeny lecą szyfrowane.
+
 ### 📝 Symulacja egzaminu ULC
 Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 
@@ -77,7 +88,9 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 | **Frontend** | React + TypeScript + Vite, stylowanie Tailwind CSS (ciemny motyw) |
 | **Backend** | FastAPI + SQLAlchemy (Python) |
 | **Baza danych** | PostgreSQL (lokalnie lub w chmurze, np. [Neon](https://neon.tech)) |
+| **Autoryzacja** | Konta e-mail + hasło · hasła hashowane **bcrypt** · sesje na podpisanych **JWT** (PyJWT) |
 | **Dane** | Parser PDF (pdfplumber) przypisujący każde słowo do kolumny wg **siatki prostokątów tabeli** + sklejanie wierszy przez łamanie stron — szczelne 2053 pytania |
+| **Hosting** | Backend na [Render](https://render.com), frontend na [Vercel](https://vercel.com) (oba z darmowym planem i TLS) |
 
 Mała, ale ważna zasada projektowa: w bazie **poprawna odpowiedź zawsze siedzi pod
 kluczem `A`** (źródło trzyma ją w kolumnie `ODP1`). Tasowanie odbywa się dopiero
@@ -88,6 +101,8 @@ to żaden użytkownik nie zgadnie odpowiedzi po jej pozycji.
 PilotReady/
 ├── backend/
 │   ├── main.py        # API: kategorie, pytania, postęp nauki
+│   ├── auth.py        # API kont: /api/auth/register, /login, /me
+│   ├── security.py    # hashowanie haseł (bcrypt) + tokeny sesji (JWT)
 │   ├── exam.py        # API egzaminu: /api/exam/start i /api/exam/submit
 │   ├── database.py    # konfiguracja bazy (czyta .env)
 │   └── models.py      # modele SQLAlchemy
@@ -97,11 +112,16 @@ PilotReady/
 │   └── seed_db.py            # questions.json → baza
 ├── src/
 │   ├── App.tsx               # panel: przedmioty + powtórka błędów + egzamin
+│   ├── api.ts                # bazowy URL API + token + wrapper fetch
+│   ├── auth.tsx              # kontekst logowania (rejestracja/login/wyloguj)
 │   ├── i18n.tsx              # tłumaczenia PL/EN + przełącznik języka
 │   └── components/
+│       ├── AuthScreen.tsx    # ekran logowania / rejestracji
 │       ├── StudySession.tsx  # tryb nauki — sesje po 10 (też powtórka błędów)
 │       └── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
 ├── database/schema.sql
+├── render.yaml               # deploy backendu (Render)
+├── vercel.json               # deploy frontendu (Vercel)
 └── ppla.pdf                  # oficjalne źródło pytań (import jednorazowy)
 ```
 
@@ -162,10 +182,21 @@ DATABASE_URL=postgresql://user:haslo@host:5432/nazwa_bazy
 
 # Skąd frontend może odpytywać API (dev server Vite stoi na 5173)
 CORS_ORIGINS=http://localhost:5173
+
+# Sekret podpisujący tokeny sesji. W produkcji MUSI być długi i losowy:
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+# Lokalnie możesz zostawić pusty — backend wygeneruje tymczasowy (sesje
+# resetują się przy każdym restarcie).
+JWT_SECRET=
+JWT_EXPIRE_MINUTES=10080
+
+# Adres backendu dla frontendu. Lokalnie ZOSTAW PUSTY (Vite proxuje /api).
+# W produkcji (Vercel) ustaw na publiczny URL backendu z Rendera.
+VITE_API_URL=
 ```
 
-Plik `.env` jest w `.gitignore` — **Twoje hasło nigdy nie trafi do repozytorium.**
-W repo leży tylko `.env.example` jako szablon.
+Plik `.env` jest w `.gitignore` — **Twoje hasło, sekret JWT i connection string
+nigdy nie trafią do repozytorium.** W repo leży tylko `.env.example` jako szablon.
 
 ---
 
@@ -185,10 +216,43 @@ W repo leży tylko `.env.example` jako szablon.
 
 ---
 
+## ☁️ Wrzucenie online (Render + Vercel)
+
+Aplikacja jest gotowa do publikacji jako strona: **backend na Render**, **frontend
+na Vercel**, baza w **Neon**. Wszystko na darmowych planach.
+
+### 1. Baza (Neon)
+Załóż projekt w [Neon](https://neon.tech), skopiuj connection string. Zaseeduj
+bazę **raz**, lokalnie (z tym `DATABASE_URL` w swoim `.env`):
+
+```bash
+python scripts/seed_db.py
+```
+
+### 2. Backend (Render)
+W [Render](https://render.com) wybierz **New + → Blueprint** i wskaż to repo —
+Render odczyta `render.yaml`. Ustaw zmienne (sekrety):
+- `DATABASE_URL` — connection string z Neona,
+- `CORS_ORIGINS` — adres frontendu z Vercela (np. `https://pilotready.vercel.app`),
+- `JWT_SECRET` — Render wygeneruje go sam (`generateValue: true`).
+
+Po deployu API żyje pod `https://twoja-nazwa.onrender.com` (health: `/healthz`).
+
+### 3. Frontend (Vercel)
+W [Vercel](https://vercel.com) zaimportuj repo (wykryje Vite i `vercel.json`).
+Dodaj zmienną środowiskową:
+- `VITE_API_URL` — publiczny URL backendu z Rendera.
+
+Deploy → gotowe. Pamiętaj, żeby adres Vercela dopisać do `CORS_ORIGINS` na Render.
+
+> Kolejność: **Neon → Render → Vercel**, a na końcu uzupełnij `CORS_ORIGINS`
+> adresem Vercela. Sekrety wpisujesz tylko w panelach Render/Vercel — nigdy do repo.
+
+---
+
 ## 🗺️ Co dalej
 
 - 📱 **Aplikacja mobilna** — wkrótce.
-- 👤 **Konta użytkowników i logowanie** — wkrótce.
 
 ---
 

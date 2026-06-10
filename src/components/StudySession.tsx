@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiFetch, apiJson } from "../api";
 import { useI18n } from "../i18n";
 
 type ProgressStatus = "CORRECT" | "INCORRECT";
@@ -22,9 +23,7 @@ export type StudySource =
   | { kind: "mistakes"; categoryId?: string };
 
 type StudySessionProps = {
-  userId: string;
   source: StudySource;
-  apiBaseUrl?: string;
   onExit?: () => void;
 };
 
@@ -54,7 +53,7 @@ function shuffledAnswersFor(question: ApiQuestion): ShuffledAnswer[] {
 
 type BatchEntry = { question: ApiQuestion; answers: ShuffledAnswer[] };
 
-export function StudySession({ userId, source, apiBaseUrl = "", onExit }: StudySessionProps) {
+export function StudySession({ source, onExit }: StudySessionProps) {
   const { t } = useI18n();
   const [questions, setQuestions] = useState<ApiQuestion[]>([]);
   const [statuses, setStatuses] = useState<Record<string, ProgressStatus>>({});
@@ -72,31 +71,32 @@ export function StudySession({ userId, source, apiBaseUrl = "", onExit }: StudyS
 
   const fetchUrl =
     source.kind === "category"
-      ? `${apiBaseUrl}/api/questions/${source.categoryId}`
-      : `${apiBaseUrl}/api/mistakes${source.categoryId ? `?category=${source.categoryId}` : ""}`;
+      ? `/api/questions/${source.categoryId}`
+      : `/api/mistakes${source.categoryId ? `?category=${source.categoryId}` : ""}`;
 
   // ----- Load the question pool ---------------------------------------------
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(fetchUrl, { headers: { "X-User-Id": userId }, signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`(${response.status})`);
-        return response.json() as Promise<ApiQuestion[]>;
-      })
+    apiJson<ApiQuestion[]>(fetchUrl)
       .then((payload) => {
+        if (cancelled) return;
         setQuestions(payload);
         const seeded: Record<string, ProgressStatus> = {};
         for (const q of payload) if (q.progress_status === "CORRECT" || q.progress_status === "INCORRECT") seeded[q.id] = q.progress_status;
         setStatuses(seeded);
       })
       .catch((fetchError: Error) => {
-        if (fetchError.name !== "AbortError") setError(fetchError.message);
+        if (!cancelled) setError(fetchError.message);
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [fetchUrl, userId]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUrl]);
 
   // Questions still to master = not yet answered correctly in this session.
   const remaining = useMemo(() => questions.filter((q) => statuses[q.id] !== "CORRECT"), [questions, statuses]);
@@ -124,18 +124,14 @@ export function StudySession({ userId, source, apiBaseUrl = "", onExit }: StudyS
     }
   }, [loading, error, questions.length, sessionNumber, remaining.length, startNextBatch]);
 
-  const syncProgress = useCallback(
-    (questionId: string, status: ProgressStatus) => {
-      void fetch(`${apiBaseUrl}/api/progress`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, question_id: questionId, status }),
-      }).catch(() => {
-        /* best-effort; UI already reflects the answer locally */
-      });
-    },
-    [apiBaseUrl, userId],
-  );
+  const syncProgress = useCallback((questionId: string, status: ProgressStatus) => {
+    void apiFetch("/api/progress", {
+      method: "POST",
+      body: JSON.stringify({ question_id: questionId, status }),
+    }).catch(() => {
+      /* best-effort; UI already reflects the answer locally */
+    });
+  }, []);
 
   const current = batch[batchPos];
 

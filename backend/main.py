@@ -7,16 +7,18 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from backend.auth import router as auth_router
 from backend.database import get_session
 from backend.exam import router as exam_router
-from backend.models import ProgressStatus, Question, QuestionCategory, User, UserProgress
+from backend.models import ProgressStatus, Question, QuestionCategory, UserProgress
+from backend.security import get_current_user_id
 
 CATEGORY_LABELS: dict[QuestionCategory, str] = {
     QuestionCategory.AIR_LAW: "Air Law",
@@ -43,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(auth_router)
 app.include_router(exam_router)
 
 
@@ -73,7 +76,6 @@ class QuestionResponse(BaseModel):
 
 
 class ProgressRequest(BaseModel):
-    user_id: uuid.UUID
     question_id: uuid.UUID
     status: ProgressStatus = Field(description="CORRECT or INCORRECT")
     client_event_id: str | None = None
@@ -98,22 +100,6 @@ class ProgressResponse(BaseModel):
     last_answered_at: datetime
 
 
-def get_logged_in_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-    user_id: Annotated[uuid.UUID | None, Query()] = None,
-) -> uuid.UUID:
-    """Resolve the current user until full auth middleware is wired in."""
-
-    if user_id is not None:
-        return user_id
-    if x_user_id:
-        try:
-            return uuid.UUID(x_user_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-User-Id header") from exc
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing logged-in user id")
-
-
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -121,7 +107,7 @@ def healthz() -> dict[str, str]:
 
 @app.get("/api/categories", response_model=list[CategoryProgressResponse])
 def get_categories(
-    current_user_id: Annotated[uuid.UUID, Depends(get_logged_in_user_id)],
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     session: Annotated[Session, Depends(get_session)],
 ) -> list[CategoryProgressResponse]:
     totals = dict(
@@ -166,7 +152,7 @@ def get_categories(
 @app.get("/api/questions/{category_id}", response_model=list[QuestionResponse])
 def get_questions(
     category_id: QuestionCategory,
-    current_user_id: Annotated[uuid.UUID, Depends(get_logged_in_user_id)],
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     session: Annotated[Session, Depends(get_session)],
 ) -> list[QuestionResponse]:
     if category_id not in SUBJECT_ORDER:
@@ -198,7 +184,7 @@ def get_questions(
 
 @app.get("/api/mistakes", response_model=list[QuestionResponse])
 def get_mistakes(
-    current_user_id: Annotated[uuid.UUID, Depends(get_logged_in_user_id)],
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     session: Annotated[Session, Depends(get_session)],
     category: Annotated[QuestionCategory | None, Query()] = None,
 ) -> list[QuestionResponse]:
@@ -231,32 +217,20 @@ def get_mistakes(
 
 
 @app.post("/api/progress", response_model=ProgressResponse)
-def upsert_progress(payload: ProgressRequest, session: Annotated[Session, Depends(get_session)]) -> ProgressResponse:
+def upsert_progress(
+    payload: ProgressRequest,
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    session: Annotated[Session, Depends(get_session)],
+) -> ProgressResponse:
     if payload.status == ProgressStatus.UNREAD:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Progress status must be Correct or Incorrect")
-
-    # Demo / no-auth mode: the client generates its own user id, so auto-provision
-    # a placeholder user on first progress write instead of rejecting it. Replace
-    # this with real auth-backed users when authentication lands.
-    user_exists = session.scalar(select(func.count()).select_from(User).where(User.id == payload.user_id))
-    if not user_exists:
-        ensure_user = (
-            insert(User)
-            .values(
-                id=payload.user_id,
-                email=f"{payload.user_id}@demo.pilotready.local",
-                password_hash="",
-            )
-            .on_conflict_do_nothing(index_elements=[User.id])
-        )
-        session.execute(ensure_user)
 
     question_exists = session.scalar(select(func.count()).select_from(Question).where(Question.id == payload.question_id))
     if not question_exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
 
     statement = insert(UserProgress).values(
-        user_id=payload.user_id,
+        user_id=current_user_id,
         question_id=payload.question_id,
         status=payload.status,
         attempts_count=1,

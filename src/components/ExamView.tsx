@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "../api";
 import { useI18n } from "../i18n";
 
 // --------------------------------------------------------------------------- //
@@ -75,7 +76,6 @@ type FlatQuestion = {
 type ExamPhase = "loading" | "error" | "active" | "submitting" | "finished";
 
 type ExamViewProps = {
-  apiBaseUrl?: string;
   onExit?: () => void;
 };
 
@@ -98,7 +98,7 @@ function formatClock(totalSeconds: number): string {
 // --------------------------------------------------------------------------- //
 // Component
 // --------------------------------------------------------------------------- //
-export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
+export function ExamView({ onExit }: ExamViewProps) {
   const { t } = useI18n();
   const [exam, setExam] = useState<ExamStartResponse | null>(null);
   const [phase, setPhase] = useState<ExamPhase>("loading");
@@ -115,16 +115,17 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
 
   // ----- Start a fresh exam on mount ----------------------------------------
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
     setPhase("loading");
     setError(null);
 
-    fetch(`${apiBaseUrl}/api/exam/start`, { method: "POST", signal: controller.signal })
+    apiFetch("/api/exam/start", { method: "POST" })
       .then((response) => {
         if (!response.ok) throw new Error(t("exam.startError", { status: response.status }));
         return response.json() as Promise<ExamStartResponse>;
       })
       .then((payload) => {
+        if (cancelled) return;
         setExam(payload);
         setSecondsLeft(payload.total_duration_seconds);
         setCurrentIndex(0);
@@ -133,14 +134,17 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
         setPhase("active");
       })
       .catch((fetchError: Error) => {
-        if (fetchError.name !== "AbortError") {
+        if (!cancelled) {
           setError(fetchError.message);
           setPhase("error");
         }
       });
 
-    return () => controller.abort();
-  }, [apiBaseUrl]);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ----- Flatten sections into one ordered question list --------------------
   const flatQuestions = useMemo<FlatQuestion[]>(() => {
@@ -164,9 +168,8 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
     setPhase("submitting");
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/exam/submit`, {
+      const response = await apiFetch("/api/exam/submit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           exam_id: exam.exam_id,
           answers: flatQuestions.map(({ question }) => ({
@@ -184,7 +187,7 @@ export function ExamView({ apiBaseUrl = "", onExit }: ExamViewProps) {
       setPhase("error");
       submittedRef.current = false; // allow a retry
     }
-  }, [apiBaseUrl, exam, flatQuestions, answers]);
+  }, [exam, flatQuestions, answers, t]);
 
   // ----- Strict countdown timer ---------------------------------------------
   useEffect(() => {
