@@ -112,3 +112,24 @@ class UserProgress(TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="progress")
     question: Mapped[Question] = relationship(back_populates="progress")
+
+
+class SupportReport(TimestampMixin, Base):
+    """A bug report or piece of feedback submitted by a logged-in user from the
+    in-app support tab."""
+
+    __tablename__ = "support_reports"
+    __table_args__ = (
+        CheckConstraint("kind in ('BUG', 'SUGGESTION', 'OTHER')", name="support_reports_kind_valid"),
+        CheckConstraint("char_length(message) between 1 and 4000", name="support_reports_message_length"),
+        Index("support_reports_user_created_idx", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="BUG")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional technical context (e.g. browser user-agent) to help reproduce.
+    context: Mapped[str | None] = mapped_column(String(400), nullable=True)

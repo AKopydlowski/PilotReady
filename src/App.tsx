@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import StudySession, { type StudySource } from "./components/StudySession";
 import ExamView from "./components/ExamView";
 import AuthScreen from "./components/AuthScreen";
+import SupportView from "./components/SupportView";
 import { apiJson } from "./api";
 import { useAuth } from "./auth";
 import { useI18n, type Lang } from "./i18n";
@@ -22,7 +23,7 @@ type Category = {
   unattempted: number;
 };
 
-type View = { kind: "dashboard" } | { kind: "study"; source: StudySource } | { kind: "exam" };
+type View = { kind: "dashboard" } | { kind: "study"; source: StudySource } | { kind: "exam" } | { kind: "support" };
 
 function LanguageToggle() {
   const { lang, setLang } = useI18n();
@@ -92,7 +93,7 @@ export default function App() {
               type="button"
               onClick={() => setView({ kind: "dashboard" })}
               className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                view.kind !== "exam" ? "bg-white/10 text-white" : "text-slate-400 hover:text-white"
+                view.kind === "dashboard" || view.kind === "study" ? "bg-white/10 text-white" : "text-slate-400 hover:text-white"
               }`}
             >
               {t("nav.learn")}
@@ -105,6 +106,15 @@ export default function App() {
               }`}
             >
               {t("nav.exam")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView({ kind: "support" })}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                view.kind === "support" ? "bg-cyan-300 text-slate-950" : "bg-white/5 text-slate-200 hover:bg-white/10"
+              }`}
+            >
+              {t("nav.support")}
             </button>
             <LanguageToggle />
             <div className="ml-1 flex items-center gap-2 border-l border-white/10 pl-3">
@@ -123,6 +133,8 @@ export default function App() {
         </nav>
 
         {view.kind === "exam" && <ExamView onExit={() => setView({ kind: "dashboard" })} />}
+
+        {view.kind === "support" && <SupportView />}
 
         {view.kind === "study" && (
           <div>

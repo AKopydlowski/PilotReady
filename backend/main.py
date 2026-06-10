@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,10 +23,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.auth import router as auth_router
-from backend.database import get_session
+from backend.database import engine, get_session
 from backend.exam import router as exam_router
-from backend.models import ProgressStatus, Question, QuestionCategory, UserProgress
+from backend.models import Base, ProgressStatus, Question, QuestionCategory, UserProgress
 from backend.security import get_current_user_id
+from backend.support import router as support_router
 
 CATEGORY_LABELS: dict[QuestionCategory, str] = {
     QuestionCategory.AIR_LAW: "Air Law",
@@ -44,7 +46,16 @@ CATEGORY_LABELS: dict[QuestionCategory, str] = {
 SUBJECT_ORDER = tuple(CATEGORY_LABELS.keys())
 
 
-app = FastAPI(title="PilotReady API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Create any tables that don't exist yet (e.g. support_reports on first
+    # deploy). checkfirst=True makes this a no-op for already-present tables, so
+    # it is safe to run on every startup and keeps new deploys self-migrating.
+    Base.metadata.create_all(engine)
+    yield
+
+
+app = FastAPI(title="PilotReady API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")],
@@ -53,6 +64,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(support_router)
 app.include_router(exam_router)
 
 

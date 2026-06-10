@@ -81,6 +81,12 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
   zostały pominięte, jaką odpowiedź wybrałeś i jaka była poprawna. Z filtrem
   „tylko błędne / wszystkie".
 
+### 🆘 Pomoc i zgłaszanie błędów
+- Zakładka **Pomoc** — zalogowany użytkownik może zgłosić **błąd**, **sugestię**
+  lub **inne**, opisując problem. Każde zgłoszenie trafia do bazy i jest
+  przypisane do konta.
+- Pod formularzem widzisz **historię swoich zgłoszeń** (typ, treść, data).
+
 ---
 
 ## 🧱 Jak to jest zbudowane
@@ -105,6 +111,7 @@ PilotReady/
 │   ├── main.py        # API: kategorie, pytania, postęp nauki
 │   ├── auth.py        # API kont: /api/auth/register, /login, /me
 │   ├── security.py    # hashowanie haseł (bcrypt) + tokeny sesji (JWT)
+│   ├── support.py     # API zgłoszeń: /api/support (+ /mine)
 │   ├── exam.py        # API egzaminu: /api/exam/start i /api/exam/submit
 │   ├── database.py    # konfiguracja bazy (czyta .env)
 │   └── models.py      # modele SQLAlchemy
@@ -120,7 +127,8 @@ PilotReady/
 │   └── components/
 │       ├── AuthScreen.tsx    # ekran logowania / rejestracji
 │       ├── StudySession.tsx  # tryb nauki — sesje po 10 (też powtórka błędów)
-│       └── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
+│       ├── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
+│       └── SupportView.tsx   # zakładka Pomoc — zgłaszanie błędów
 ├── database/schema.sql
 ├── render.yaml               # deploy backendu (Render)
 ├── vercel.json               # deploy frontendu (Vercel)

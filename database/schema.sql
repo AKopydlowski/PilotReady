@@ -51,6 +51,17 @@ CREATE TABLE user_progress (
   PRIMARY KEY (user_id, question_id)
 );
 
+CREATE TABLE support_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind varchar(20) NOT NULL DEFAULT 'BUG' CHECK (kind IN ('BUG', 'SUGGESTION', 'OTHER')),
+  message text NOT NULL CHECK (char_length(message) BETWEEN 1 AND 4000),
+  context varchar(400),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX questions_category_idx ON questions (category);
 CREATE INDEX user_progress_user_status_idx ON user_progress (user_id, status);
 CREATE INDEX user_progress_last_answered_idx ON user_progress (last_answered_at DESC);
+CREATE INDEX support_reports_user_created_idx ON support_reports (user_id, created_at DESC);
