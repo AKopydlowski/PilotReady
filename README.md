@@ -204,8 +204,6 @@ nigdy nie trafią do repozytorium.** W repo leży tylko `.env.example` jako szab
 
 ## ☁️ Hosting
 
-Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
-
 | Warstwa | Gdzie | Adres |
 |---|---|---|
 | 🖥️ Frontend | [Vercel](https://vercel.com) | **[pilot-ready.vercel.app](https://pilot-ready.vercel.app)** |
@@ -221,20 +219,15 @@ Projekt jest **wdrożony i działa na żywo** — wszystko na darmowych planach:
 ## 🗺️ Co dalej
 
 - 📱 **Aplikacja mobilna** — wkrótce.
-- ⚡ **Usprawnienia hostingu** — m.in. wybudzanie backendu (koniec z zimnym startem) i własna domena.
 
 ---
 
 ## 📄 Licencja
 
-**PolyForm Noncommercial License 1.0.0** — _Copyright (c) 2026 PilotReady. All rights reserved._
+**PolyForm Noncommercial License 1.0.0** — _Copyright (c) 2026 Aleksander Kopydłowski. All rights reserved._
 
-Krótko: możesz używać, uczyć się i rozwijać projekt **do celów niekomercyjnych**
-(nauka własna, badania, projekty hobbystyczne, instytucje edukacyjne itd.).
 **Użycie komercyjne jest wykluczone.** Pełne warunki w pliku [LICENSE](LICENSE).
 
-> ℹ️ Nagłówki licencyjne w plikach źródłowych to na razie **wersja wstępna (stub)**
-> — zostaną jeszcze dopracowane (m.in. właściwy podmiot praw autorskich).
 
 ---
 
