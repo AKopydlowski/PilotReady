@@ -88,7 +88,7 @@ export default function App() {
       <div className="mx-auto max-w-6xl">
         <nav className="mb-8 flex items-center justify-between gap-4">
           <button type="button" onClick={() => setView({ kind: "dashboard" })} className="flex items-center gap-3 text-left">
-            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-cyan-300 text-lg font-black text-slate-950">PR</span>
+            <img src="/pilotready-logo.png" alt="PilotReady" className="h-11 w-11 rounded-2xl object-contain" />
             <span>
               <span className="block text-lg font-bold text-white">PilotReady</span>
               <span className="block text-xs uppercase tracking-[0.3em] text-cyan-300">{t("app.tagline")}</span>

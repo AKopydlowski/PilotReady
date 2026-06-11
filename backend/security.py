@@ -135,3 +135,21 @@ def get_current_user_id(
         return uuid.UUID(str(payload["sub"]))
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise _CREDENTIALS_ERROR from exc
+
+
+def get_optional_user_id(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+) -> uuid.UUID | None:
+    """Like :func:`get_current_user_id` but never rejects the request — returns
+    the user id when a valid Bearer token is present, otherwise ``None``.
+
+    Used by endpoints that work for anonymous callers too (e.g. recording a
+    page visit before the user has logged in)."""
+
+    if credentials is None or not credentials.credentials:
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+        return uuid.UUID(str(payload["sub"]))
+    except (jwt.PyJWTError, KeyError, ValueError):
+        return None

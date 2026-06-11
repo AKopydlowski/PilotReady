@@ -62,8 +62,22 @@ CREATE TABLE support_reports (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Anonymous traffic tracking that powers the admin analytics panel. We store
+-- only a client-generated visitor_id (a localStorage uuid) — never an IP or
+-- other personal identifier — plus an optional user_id for logged-in visits.
+CREATE TABLE page_visits (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  visitor_id varchar(64) NOT NULL,
+  user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  path varchar(200),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX questions_category_idx ON questions (category);
 CREATE INDEX user_progress_user_status_idx ON user_progress (user_id, status);
 CREATE INDEX user_progress_last_answered_idx ON user_progress (last_answered_at DESC);
 CREATE INDEX support_reports_user_created_idx ON support_reports (user_id, created_at DESC);
 CREATE INDEX support_reports_status_idx ON support_reports (status);
+CREATE INDEX page_visits_created_idx ON page_visits (created_at);
+CREATE INDEX page_visits_visitor_idx ON page_visits (visitor_id);
+CREATE INDEX page_visits_user_idx ON page_visits (user_id);

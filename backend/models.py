@@ -139,3 +139,31 @@ class SupportReport(TimestampMixin, Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional technical context (e.g. browser user-agent) to help reproduce.
     context: Mapped[str | None] = mapped_column(String(400), nullable=True)
+
+
+class PageVisit(Base):
+    """A single site visit, recorded by the SPA on load. Powers the admin
+    analytics panel (traffic, unique visitors, signups vs. visits).
+
+    ``visitor_id`` is an anonymous, client-generated id persisted in the
+    browser's localStorage; it lets us count *unique visitors* without storing
+    any IP address or other personal identifier. ``user_id`` is filled in only
+    when the visit happened while a valid session token was present.
+    """
+
+    __tablename__ = "page_visits"
+    __table_args__ = (
+        Index("page_visits_created_idx", "created_at"),
+        Index("page_visits_visitor_idx", "visitor_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Anonymous per-browser id from localStorage (uuid). Not personal data.
+    visitor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    path: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

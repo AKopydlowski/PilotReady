@@ -63,6 +63,42 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return response;
 }
 
+// --- Anonymous visit tracking -------------------------------------------------
+// A stable per-browser id (uuid) kept in localStorage lets the backend count
+// unique visitors without storing any IP / personal data. The per-session flag
+// makes sure we record at most one visit per tab open.
+const VISITOR_KEY = "pilotready:visitor";
+const VISIT_SESSION_FLAG = "pilotready:visit-recorded";
+
+function getVisitorId(): string {
+  let id = window.localStorage.getItem(VISITOR_KEY);
+  if (!id) {
+    id = (window.crypto?.randomUUID?.() ?? `v-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    window.localStorage.setItem(VISITOR_KEY, id);
+  }
+  return id;
+}
+
+/**
+ * Record a page visit for analytics, at most once per browser session. Fire and
+ * forget — never throws, never blocks the UI, and silently ignores failures
+ * (e.g. offline or rate-limited).
+ */
+export function recordVisit(): void {
+  try {
+    if (window.sessionStorage.getItem(VISIT_SESSION_FLAG)) return;
+    window.sessionStorage.setItem(VISIT_SESSION_FLAG, "1");
+    void apiFetch("/api/analytics/visit", {
+      method: "POST",
+      body: JSON.stringify({ visitor_id: getVisitorId(), path: window.location.pathname }),
+    }).catch(() => {
+      /* analytics is best-effort; ignore errors */
+    });
+  } catch {
+    /* storage unavailable (private mode etc.) — skip tracking */
+  }
+}
+
 /** Like {@link apiFetch} but parses JSON and raises a readable error on failure. */
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, init);

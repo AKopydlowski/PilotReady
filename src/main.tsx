@@ -8,9 +8,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { recordVisit } from "./api";
 import { AuthProvider } from "./auth";
 import { I18nProvider } from "./i18n";
 import "./index.css";
+
+// Record an anonymous visit once per browser session (covers anonymous visitors
+// who only ever see the login screen). Best-effort — never blocks rendering.
+recordVisit();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

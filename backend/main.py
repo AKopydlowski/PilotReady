@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.admin import router as admin_router
+from backend.analytics import router as analytics_router
 from backend.auth import router as auth_router
 from backend.database import engine, get_session
 from backend.exam import router as exam_router
@@ -78,6 +79,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(support_router)
 app.include_router(admin_router)
+app.include_router(analytics_router)
 app.include_router(exam_router)
 
 

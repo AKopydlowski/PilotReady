@@ -8,6 +8,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiJson } from "../api";
 import { useI18n } from "../i18n";
+import AdminAnalytics from "./AdminAnalytics";
+
+type AdminTab = "reports" | "analytics";
 
 type SupportStatus = "NEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
 type SupportKind = "BUG" | "SUGGESTION" | "OTHER";
@@ -52,6 +55,7 @@ const KIND_STYLE: Record<SupportKind, string> = {
 
 export default function AdminView() {
   const { t, lang } = useI18n();
+  const [tab, setTab] = useState<AdminTab>("reports");
   const [data, setData] = useState<ListResponse | null>(null);
   const [filter, setFilter] = useState<SupportStatus | "ALL">("ALL");
   const [loading, setLoading] = useState(true);
@@ -172,6 +176,27 @@ export default function AdminView() {
         <p className="mt-2 text-slate-400">{t("admin.subtitle")}</p>
       </header>
 
+      {/* Tab switcher: reports queue vs. analytics dashboard */}
+      <div className="mb-6 flex gap-2 border-b border-white/10">
+        {(["reports", "analytics"] as AdminTab[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={classNames(
+              "-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition",
+              tab === key ? "border-cyan-300 text-white" : "border-transparent text-slate-400 hover:text-white",
+            )}
+          >
+            {t(`admin.tab.${key}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "analytics" && <AdminAnalytics />}
+
+      {tab === "reports" && (
+        <>
       {/* Status filter chips with counts */}
       <div className="mb-6 flex flex-wrap gap-2">
         <button
@@ -311,6 +336,8 @@ export default function AdminView() {
             </li>
           ))}
         </ul>
+      )}
+        </>
       )}
     </section>
   );
