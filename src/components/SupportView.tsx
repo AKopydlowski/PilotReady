@@ -36,10 +36,11 @@ function classNames(...names: Array<string | false | null | undefined>) {
   return names.filter(Boolean).join(" ");
 }
 
-export default function SupportView() {
+export default function SupportView({ questionRef }: { questionRef?: string }) {
   const { t, lang } = useI18n();
   const [kind, setKind] = useState<SupportKind>("BUG");
-  const [message, setMessage] = useState("");
+  // Arriving from "report this question" starts the message with its ID.
+  const [message, setMessage] = useState(() => (questionRef ? `[${questionRef}] ` : ""));
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,10 +137,16 @@ export default function SupportView() {
 
   return (
     <section className="mx-auto max-w-3xl">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-white">{t("support.title")}</h1>
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold text-white sm:text-3xl">{t("support.title")}</h1>
         <p className="mt-2 text-slate-400">{t("support.subtitle")}</p>
       </header>
+
+      {questionRef && (
+        <p className="mb-4 rounded-2xl border border-cyan-300/25 bg-cyan-300/5 px-4 py-3 text-sm text-cyan-100">
+          {t("support.questionRef", { id: questionRef })}
+        </p>
+      )}
 
       <form
         onSubmit={handleSubmit}
@@ -176,6 +183,7 @@ export default function SupportView() {
             }}
             required
             rows={6}
+            autoFocus={Boolean(questionRef)}
             placeholder={t("support.messagePlaceholder")}
             className="resize-y rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300/70 focus:bg-white/10"
           />
