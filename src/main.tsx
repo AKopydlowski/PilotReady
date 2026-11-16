@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { recordVisit } from "./api";
 import { AuthProvider } from "./auth";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { I18nProvider } from "./i18n";
 import "./index.css";
 
@@ -19,10 +20,12 @@ recordVisit();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <I18nProvider>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </I18nProvider>
+    <ErrorBoundary>
+      <I18nProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </I18nProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );
