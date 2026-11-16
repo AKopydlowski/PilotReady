@@ -81,3 +81,21 @@ CREATE INDEX support_reports_status_idx ON support_reports (status);
 CREATE INDEX page_visits_created_idx ON page_visits (created_at);
 CREATE INDEX page_visits_visitor_idx ON page_visits (visitor_id);
 CREATE INDEX page_visits_user_idx ON page_visits (user_id);
+
+-- One ULC exam simulation. Created on start with the drawn question set so the
+-- whole paper is graded on submit; completed with the verdict for the history.
+CREATE TABLE exam_attempts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  deadline_at timestamptz NOT NULL,
+  finished_at timestamptz,
+  question_ids jsonb NOT NULL,
+  total_questions integer NOT NULL DEFAULT 0,
+  total_correct integer,
+  score_percent double precision,
+  passed boolean,
+  sections jsonb
+);
+
+CREATE INDEX exam_attempts_user_started_idx ON exam_attempts (user_id, started_at);

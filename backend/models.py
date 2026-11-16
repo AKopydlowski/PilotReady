@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -139,6 +139,35 @@ class SupportReport(TimestampMixin, Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional technical context (e.g. browser user-agent) to help reproduce.
     context: Mapped[str | None] = mapped_column(String(400), nullable=True)
+
+
+class ExamAttempt(Base):
+    """One ULC exam simulation taken by a user.
+
+    A row is created when the exam starts and holds the exact set of questions
+    that was drawn, so grading covers the whole paper (a client cannot submit
+    only the questions it is sure about). It is completed on submit with the
+    verdict and per-subject scores, which powers the exam history.
+    """
+
+    __tablename__ = "exam_attempts"
+    __table_args__ = (Index("exam_attempts_user_started_idx", "user_id", "started_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Question ids (as strings) in the order they were presented.
+    question_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    total_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_correct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Per-subject results (list of SectionResult dicts) once graded.
+    sections: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
 
 class PageVisit(Base):

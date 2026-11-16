@@ -12,26 +12,30 @@ Lotnictwa Cywilnego) PPL(A) theory exam. The exam is split into nine subjects,
 each with an official question count and time limit. A candidate must score at
 least 75% in EACH subject to pass.
 
-The engine is intentionally **stateless**: ``/start`` pulls a fresh randomized,
-balanced set of questions (answers shuffled server-side, with the correct option
-never revealed to the client), and ``/submit`` re-reads the canonical answers
-from the database to grade what the client returns. No exam-session table is
-required.
+``/start`` draws a fresh randomized, balanced paper (answers shuffled
+server-side, with the correct option never revealed to the client) and records
+it as an :class:`~backend.models.ExamAttempt`. ``/submit`` grades the *whole*
+recorded paper against the canonical answers in the database, so unanswered
+questions count as wrong and a client cannot cherry-pick what it submits. The
+graded attempt is kept for the exam history, and every answered question also
+updates the user's study progress, so exam mistakes land in the review pool.
 """
 
 from __future__ import annotations
 
 import random
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.database import get_session
-from backend.models import Question, QuestionCategory
+from backend.models import ExamAttempt, ProgressStatus, Question, QuestionCategory, UserProgress
 from backend.security import get_current_user_id
 
 router = APIRouter(prefix="/api/exam", tags=["exam"])
@@ -114,6 +118,10 @@ class ExamSection(BaseModel):
 
 class ExamStartResponse(BaseModel):
     exam_id: uuid.UUID
+    # Wall-clock bounds of the attempt so the client can run a drift-free
+    # countdown and resume after a page reload.
+    started_at: datetime
+    deadline_at: datetime
     total_questions: int
     total_duration_minutes: int
     total_duration_seconds: int
@@ -162,6 +170,25 @@ class ExamSubmitResponse(BaseModel):
     results: list[QuestionResult]
 
 
+class ExamHistoryItem(BaseModel):
+    exam_id: uuid.UUID
+    started_at: datetime
+    finished_at: datetime
+    duration_seconds: int
+    passed: bool
+    total_questions: int
+    total_correct: int
+    overall_score_percent: float
+    sections: list[SectionResult]
+
+
+class ExamHistoryResponse(BaseModel):
+    taken: int
+    passed: int
+    best_score_percent: float | None
+    items: list[ExamHistoryItem]
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -177,6 +204,41 @@ def _shuffled_options(question: Question) -> list[ExamAnswerOption]:
     return [ExamAnswerOption(key=OPTION_LABELS[index], text=text) for index, text in enumerate(texts)]
 
 
+def _record_progress(session: Session, user_id: uuid.UUID, results: list[QuestionResult]) -> None:
+    """Feed answered exam questions into the user's study progress.
+
+    A wrong exam answer puts the question into the mistakes-review pool and a
+    right one marks it mastered, exactly as if it had been answered in study
+    mode. Skipped questions are left untouched.
+    """
+
+    rows = [
+        {
+            "user_id": user_id,
+            "question_id": result.question_id,
+            "status": ProgressStatus.CORRECT if result.is_correct else ProgressStatus.INCORRECT,
+            "attempts_count": 1,
+            "last_answered_at": func.now(),
+        }
+        for result in results
+        if result.answered
+    ]
+    if not rows:
+        return
+    statement = insert(UserProgress).values(rows)
+    session.execute(
+        statement.on_conflict_do_update(
+            index_elements=[UserProgress.user_id, UserProgress.question_id],
+            set_={
+                "status": statement.excluded.status,
+                "attempts_count": UserProgress.attempts_count + 1,
+                "last_answered_at": func.now(),
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -188,7 +250,7 @@ def start_exam(
     """Assemble a fresh, randomized, balanced ULC exam per the official blueprint."""
 
     sections: list[ExamSection] = []
-    total_questions = 0
+    question_ids: list[str] = []
     total_minutes = 0
 
     for subject in ULC_BLUEPRINT:
@@ -209,6 +271,7 @@ def start_exam(
             )
             for question in rows
         ]
+        question_ids.extend(str(question.id) for question in rows)
 
         sections.append(
             ExamSection(
@@ -221,12 +284,32 @@ def start_exam(
                 questions=questions,
             )
         )
-        total_questions += len(questions)
         total_minutes += subject.duration_minutes
 
+    # Abandoned papers (started but never submitted) are useless after a day.
+    now = datetime.now(timezone.utc)
+    session.execute(
+        delete(ExamAttempt).where(
+            ExamAttempt.user_id == current_user_id,
+            ExamAttempt.finished_at.is_(None),
+            ExamAttempt.started_at < now - timedelta(days=1),
+        )
+    )
+    attempt = ExamAttempt(
+        user_id=current_user_id,
+        started_at=now,
+        deadline_at=now + timedelta(minutes=total_minutes),
+        question_ids=question_ids,
+        total_questions=len(question_ids),
+    )
+    session.add(attempt)
+    session.commit()
+
     return ExamStartResponse(
-        exam_id=uuid.uuid4(),
-        total_questions=total_questions,
+        exam_id=attempt.id,
+        started_at=attempt.started_at,
+        deadline_at=attempt.deadline_at,
+        total_questions=len(question_ids),
         total_duration_minutes=total_minutes,
         total_duration_seconds=total_minutes * 60,
         pass_threshold_percent=PASS_THRESHOLD_PERCENT,
@@ -250,22 +333,35 @@ def submit_exam(
         for answer in payload.answers
     }
 
-    questions = (
-        session.scalars(select(Question).where(Question.id.in_(submitted_by_id.keys()))).all()
-        if submitted_by_id
-        else []
-    )
+    # Resolve the recorded attempt. When it exists, the paper drawn at /start is
+    # the source of truth for *which* questions are graded. Without one (an old
+    # client mid-deploy) we fall back to grading exactly what was submitted.
+    attempt: ExamAttempt | None = None
+    if payload.exam_id is not None:
+        attempt = session.get(ExamAttempt, payload.exam_id)
+        if attempt is not None and attempt.user_id != current_user_id:
+            attempt = None
+    if attempt is not None and attempt.finished_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Exam already submitted")
+
+    if attempt is not None:
+        graded_ids = [uuid.UUID(value) for value in attempt.question_ids]
+    else:
+        graded_ids = list(submitted_by_id.keys())
+
+    questions = session.scalars(select(Question).where(Question.id.in_(graded_ids))).all() if graded_ids else []
     questions_by_id = {question.id: question for question in questions}
 
     results: list[QuestionResult] = []
     # category -> [correct_count, answered_count, total_count]
     section_tally: dict[str, list[int]] = {subject.category.value: [0, 0, 0] for subject in ULC_BLUEPRINT}
 
-    for question_id, selected_text in submitted_by_id.items():
+    for question_id in graded_ids:
         question = questions_by_id.get(question_id)
         if question is None:
-            continue  # Unknown id (e.g. stale client) — ignore rather than fail the whole exam.
+            continue  # Question removed since the paper was drawn — ignore it.
 
+        selected_text = submitted_by_id.get(question_id)
         category_value = question.category.value
         correct_answer = question.correct_answer
         answered = selected_text is not None
@@ -319,6 +415,16 @@ def submit_exam(
     # Pass requires every subject at/above threshold AND at least one graded question.
     passed = all_sections_passed and total_questions > 0
 
+    if attempt is not None:
+        attempt.finished_at = datetime.now(timezone.utc)
+        attempt.total_questions = total_questions
+        attempt.total_correct = total_correct
+        attempt.score_percent = overall_score_percent
+        attempt.passed = passed
+        attempt.sections = [section.model_dump() for section in sections]
+    _record_progress(session, current_user_id, results)
+    session.commit()
+
     return ExamSubmitResponse(
         exam_id=payload.exam_id,
         passed=passed,
@@ -328,4 +434,46 @@ def submit_exam(
         overall_score_percent=overall_score_percent,
         sections=sections,
         results=results,
+    )
+
+
+@router.get("/history", response_model=ExamHistoryResponse)
+def exam_history(
+    current_user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    session: Annotated[Session, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> ExamHistoryResponse:
+    """The user's finished exams, newest first, with lifetime totals."""
+
+    finished = (ExamAttempt.user_id == current_user_id) & ExamAttempt.finished_at.is_not(None)
+    taken, passed_count, best = session.execute(
+        select(
+            func.count(),
+            func.count().filter(ExamAttempt.passed.is_(True)),
+            func.max(ExamAttempt.score_percent),
+        ).where(finished)
+    ).one()
+
+    attempts = session.scalars(
+        select(ExamAttempt).where(finished).order_by(ExamAttempt.finished_at.desc()).limit(limit)
+    ).all()
+
+    return ExamHistoryResponse(
+        taken=int(taken or 0),
+        passed=int(passed_count or 0),
+        best_score_percent=float(best) if best is not None else None,
+        items=[
+            ExamHistoryItem(
+                exam_id=attempt.id,
+                started_at=attempt.started_at,
+                finished_at=attempt.finished_at,
+                duration_seconds=max(0, int((attempt.finished_at - attempt.started_at).total_seconds())),
+                passed=bool(attempt.passed),
+                total_questions=attempt.total_questions,
+                total_correct=attempt.total_correct or 0,
+                overall_score_percent=attempt.score_percent or 0.0,
+                sections=[SectionResult(**section) for section in (attempt.sections or [])],
+            )
+            for attempt in attempts
+        ],
     )
