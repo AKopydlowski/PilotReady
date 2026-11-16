@@ -85,10 +85,17 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(_encode_password(password), bcrypt.gensalt()).decode("utf-8")
 
 
+# A real bcrypt hash of a random throwaway password. Verifying against it when
+# an account does not exist costs the same as a genuine check, so login timing
+# does not reveal which emails are registered.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(secrets.token_bytes(24), bcrypt.gensalt()).decode("utf-8")
+
+
 def verify_password(password: str, password_hash: str) -> bool:
     """Check a plaintext password against a stored bcrypt hash (constant-time)."""
 
     if not password_hash:
+        bcrypt.checkpw(_encode_password(password), _DUMMY_PASSWORD_HASH.encode("utf-8"))
         return False
     try:
         return bcrypt.checkpw(_encode_password(password), password_hash.encode("utf-8"))
