@@ -30,6 +30,20 @@ zbliżonych do prawdziwych: z zegarem, limitami czasu i progiem zaliczenia.
 - **Pasek opanowania** pokazuje, ile pytań w przedmiocie masz już zaliczone.
 - Odpowiedzi są **tasowane przy każdym wyświetleniu** — uczysz się treści, a nie
   pozycji „zawsze A". Postęp zapisuje się automatycznie po każdym pytaniu.
+- **Skróty klawiszowe**: `1`–`4` (lub `A`–`D`) wybierają odpowiedź, `Enter`
+  przechodzi dalej.
+- **Podsumowanie sesji** pokazuje przy każdym błędzie, co zaznaczyłeś i jaka
+  odpowiedź była poprawna.
+- **Odpowiedzi nie giną bez sieci** — trafiają do lokalnej kolejki i dosyłają
+  się, gdy wróci połączenie (albo obudzi się serwer).
+- Przy każdym pytaniu jest **„Zgłoś błąd w pytaniu"** — otwiera formularz
+  pomocy z wpisanym już numerem pytania.
+
+### 🏠 Panel postępów
+- Ogólny procent opanowania banku, liczba pytań do powtórki, zdane egzaminy i
+  najlepszy wynik — na jednym ekranie.
+- Przycisk **„Kontynuuj"** wraca do ostatnio uczonego przedmiotu.
+- **Historia ostatnich egzaminów** z wynikiem i czasem.
 
 ### 🔁 Powtórka błędów
 - Pod przedmiotami zbierają się **Twoje błędne odpowiedzi** — osobno **dla
@@ -68,9 +82,19 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 | Łączność | 12 | 20 min |
 | **Razem** | **120** | **230 min** |
 
+- 🚦 **Ekran startowy** z zasadami — zegar rusza dopiero po kliknięciu
+  „Rozpocznij egzamin".
 - ⏱️ **Surowy zegar odliczający** — robi się żółty na 5 minut przed końcem,
   pulsuje na czerwono na ostatniej minucie i **automatycznie kończy egzamin**,
   gdy czas się skończy.
+- 💾 **Egzamin przetrwa odświeżenie strony** — odpowiedzi zapisują się na
+  bieżąco, a zegar liczy do stałej godziny zakończenia, więc po powrocie
+  jesteś w tym samym miejscu.
+- 🚩 **Flagi** — oznaczasz pytania, do których chcesz wrócić. Przed oddaniem
+  widzisz, ile pytań jest bez odpowiedzi i ile oznaczonych.
+- 🧮 **Oceniany jest cały arkusz** — pytanie bez odpowiedzi liczy się jako
+  błędne. Błędy z egzaminu trafiają do **powtórki błędów**.
+- ⌨️ Skróty: `1`–`4` odpowiedź, `←` `→` nawigacja, `F` flaga.
 - 🤫 **Bez podpowiedzi w trakcie** — zaznaczona odpowiedź jest neutralna, nigdy
   nie zobaczysz „zielone/czerwone" przed oddaniem egzaminu (tak jak na prawdziwym).
 - 🗂️ **Arkusz przeglądu (sidebar)** — w każdej chwili widzisz, na które pytania
@@ -112,7 +136,7 @@ Wierne odwzorowanie prawdziwego egzaminu teoretycznego:
 | **Backend** | FastAPI + SQLAlchemy (Python) |
 | **Baza danych** | PostgreSQL (lokalnie lub w chmurze, np. [Neon](https://neon.tech)) |
 | **Autoryzacja** | Konta e-mail + hasło · hasła hashowane **bcrypt** · sesje na podpisanych **JWT** (PyJWT) |
-| **Dane** | Parser PDF (pdfplumber) przypisujący każde słowo do kolumny wg **siatki prostokątów tabeli** + sklejanie wierszy przez łamanie stron — szczelne 2053 pytania |
+| **Dane** | Parser PDF (pdfplumber) przypisujący każde słowo do kolumny wg **siatki prostokątów tabeli** + sklejanie wierszy przez łamanie stron — szczelne 2053 pytania. Tekst przechodzi przez **czyszczenie błędów źródła** (encje HTML, zgubione `°` i potęgi, rozbite wyrazy złożone, spacje przed interpunkcją) |
 | **Hosting** | Backend na [Render](https://render.com), frontend na [Vercel](https://vercel.com) (oba z darmowym planem i TLS) |
 
 Mała, ale ważna zasada projektowa: w bazie **poprawna odpowiedź zawsze siedzi pod
@@ -129,22 +153,28 @@ PilotReady/
 │   ├── ratelimit.py   # rate limiting (anty-spam / anty-flood)
 │   ├── support.py     # API zgłoszeń: /api/support (+ /mine)
 │   ├── admin.py       # panel admina: /api/admin/support (lista + status)
-│   ├── exam.py        # API egzaminu: /api/exam/start i /api/exam/submit
+│   ├── exam.py        # API egzaminu: /api/exam/start, /submit, /history
 │   ├── database.py    # konfiguracja bazy (czyta .env)
 │   └── models.py      # modele SQLAlchemy
 ├── scripts/
 │   ├── parse_ppla_pdf.py     # PDF → data/questions.json (siatka prostokątów)
-│   ├── validate_questions.py # test szczelności banku pytań
+│   ├── question_text.py      # czyszczenie tekstu pytań (błędy źródła)
+│   ├── validate_questions.py # test szczelności i czystości banku pytań
 │   └── seed_db.py            # questions.json → baza
+├── tests/                    # pytest: czyszczenie tekstu + testy API
 ├── src/
-│   ├── App.tsx               # panel: przedmioty + powtórka błędów + egzamin
-│   ├── api.ts                # bazowy URL API + token + wrapper fetch
+│   ├── App.tsx               # powłoka: nagłówek, nawigacja, trasy
+│   ├── router.ts             # mini-router na hashu (#/exam, #/study/…)
+│   ├── api.ts                # URL API + token + fetch + kolejka odpowiedzi
+│   ├── examStorage.ts        # zapis egzaminu w toku (wznawianie)
 │   ├── auth.tsx              # kontekst logowania (rejestracja/login/wyloguj)
 │   ├── i18n.tsx              # tłumaczenia PL/EN + przełącznik języka
 │   └── components/
+│       ├── ui.tsx            # ikony, pasek/pierścień postępu, modal, RichText
+│       ├── Dashboard.tsx     # panel postępów, przedmioty, historia egzaminów
 │       ├── AuthScreen.tsx    # ekran logowania / rejestracji
 │       ├── StudySession.tsx  # tryb nauki — sesje po 10 (też powtórka błędów)
-│       ├── ExamView.tsx      # sala egzaminacyjna + przegląd wyników
+│       ├── ExamView.tsx      # start, sala egzaminacyjna, wyniki
 │       ├── SupportView.tsx   # zakładka Pomoc — zgłaszanie błędów
 │       └── AdminView.tsx     # panel admina — zarządzanie zgłoszeniami
 ├── database/schema.sql
@@ -173,11 +203,13 @@ python -m pip install -r requirements.txt
 cp .env.example .env        # PowerShell: Copy-Item .env.example .env
 # ...i wpisz swój DATABASE_URL w pliku .env
 
-# wyciągnij pytania z PDF do data/questions.json
+# wyciągnij pytania z PDF do data/questions.json (ok. 15 s; czyta strony
+# równolegle — liczbę procesów ustawia --jobs)
 python scripts/parse_ppla_pdf.py --input ppla.pdf --output data/questions.json --pretty
 
-# (opcjonalnie) sprawdź szczelność banku: 2053 pytania, 4 niepuste odpowiedzi,
-# klucz A = poprawna, 0 nieprzypisanych. Zwraca kod !=0 jeśli coś jest nie tak.
+# (opcjonalnie) sprawdź szczelność banku: 2053 pytania, 4 niepuste i czyste
+# odpowiedzi, klucz A = poprawna, 0 nieprzypisanych. Zwraca kod !=0 jeśli coś
+# jest nie tak; osobno wypisuje dziwactwa samego źródła do ręcznego przejrzenia.
 python scripts/validate_questions.py
 
 # wgraj pytania do bazy (utworzy tabele i zaseeduje 2053 pytania)
@@ -199,6 +231,19 @@ npm run dev
 
 Otwórz **http://localhost:5173** — gotowe! Vite automatycznie przekierowuje
 zapytania `/api` do backendu, więc nie musisz nic dodatkowo konfigurować.
+
+### 3. Testy
+
+```bash
+python -m pip install -r requirements-dev.txt
+
+# testy czyszczenia tekstu pytań (bez bazy)
+python -m pytest
+
+# + testy API (logowanie, postęp, egzamin). Potrzebują OSOBNEJ bazy testowej
+# z wgranymi pytaniami — baza z .env nigdy nie jest używana przez testy.
+TEST_DATABASE_URL=postgresql://postgres:haslo@localhost:5432/pilotready_test python -m pytest
+```
 
 ---
 
