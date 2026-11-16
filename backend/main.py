@@ -17,7 +17,8 @@ from typing import Annotated, Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -61,7 +62,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="PilotReady API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PilotReady API", version="0.2.0", lifespan=lifespan)
+
+# Question lists are large, repetitive JSON (a full subject is several hundred
+# kB); gzip shrinks them roughly 5x, which matters most on mobile connections.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Rate limiting (anti-spam / anti-abuse). Register the limiter + 429 handler, and
 # add SlowAPIMiddleware BEFORE CORS so the CORS middleware stays outermost and
@@ -111,19 +116,28 @@ class QuestionResponse(BaseModel):
 
 class ProgressRequest(BaseModel):
     question_id: uuid.UUID
-    status: ProgressStatus = Field(description="CORRECT or INCORRECT")
-    client_event_id: str | None = None
+    # Preferred: send the chosen answer and let the server grade it. ``status``
+    # is still accepted on its own for older clients.
+    selected_text: str | None = Field(default=None, max_length=2000)
+    status: ProgressStatus | None = Field(default=None, description="CORRECT or INCORRECT")
+    client_event_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, value: Any) -> Any:
-        if isinstance(value, ProgressStatus):
+        if value is None or isinstance(value, ProgressStatus):
             return value
         if isinstance(value, str):
             normalized = value.strip().upper()
             if normalized in {"CORRECT", "INCORRECT"}:
                 return normalized
         raise ValueError("status must be Correct/Incorrect")
+
+    @model_validator(mode="after")
+    def answer_or_status_required(self) -> "ProgressRequest":
+        if self.selected_text is None and self.status is None:
+            raise ValueError("either selected_text or status is required")
+        return self
 
 
 class ProgressResponse(BaseModel):
@@ -259,14 +273,23 @@ def upsert_progress(
     if payload.status == ProgressStatus.UNREAD:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Progress status must be Correct or Incorrect")
 
-    question_exists = session.scalar(select(func.count()).select_from(Question).where(Question.id == payload.question_id))
-    if not question_exists:
+    correct_answer = session.scalar(select(Question.correct_answer).where(Question.id == payload.question_id))
+    if correct_answer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+
+    # Grade on the server whenever the client tells us what was picked, so the
+    # recorded status never depends on the client's own verdict.
+    if payload.selected_text is not None:
+        progress_status = (
+            ProgressStatus.CORRECT if payload.selected_text.strip() == correct_answer else ProgressStatus.INCORRECT
+        )
+    else:
+        progress_status = payload.status
 
     statement = insert(UserProgress).values(
         user_id=current_user_id,
         question_id=payload.question_id,
-        status=payload.status,
+        status=progress_status,
         attempts_count=1,
         last_answered_at=func.now(),
         cached_client_event_id=payload.client_event_id,
