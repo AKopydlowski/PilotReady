@@ -34,10 +34,18 @@ from __future__ import annotations
 import argparse
 import bisect
 import json
+import os
 import re
+import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
+
+try:  # Run as a script (scripts/ on sys.path) or imported as a package module.
+    from question_text import join_cell_lines, normalize_text
+except ImportError:  # pragma: no cover - import style depends on the caller
+    from scripts.question_text import join_cell_lines, normalize_text
 
 EXPECTED_COLUMNS = ("L.p.", "NUMER", "PYTANIE", "ODP1", "ODP2", "ODP3", "ODP4")
 NORMALIZED_COLUMNS = tuple(re.sub(r"[^A-Z0-9]", "", value.upper()) for value in EXPECTED_COLUMNS)
@@ -118,6 +126,7 @@ class ParseStats:
     sequential_gaps: list[int] = field(default_factory=list)
     issues: list[ParseIssue] = field(default_factory=list)
     parsed_by_method: dict[str, int] = field(default_factory=dict)
+    used_rescue: bool = False
 
     @property
     def total_scanned(self) -> int:
@@ -196,7 +205,7 @@ def source_row_number_from_text(value: str) -> int | None:
 
 
 def build_question(source_row_number: int | None, external_id: str, cells: Sequence[str]) -> ParsedQuestion | None:
-    question_text, odp1, odp2, odp3, odp4 = (clean_cell(cell) for cell in cells[:5])
+    question_text, odp1, odp2, odp3, odp4 = (normalize_text(clean_cell(cell)) for cell in cells[:5])
     # Some source rows genuinely omit one or more distractor cells, but ODP1 is
     # the canonical correct answer and must stay attached to the anchored ID.
     # Keep the record auditable instead of dropping the question ID entirely.
@@ -546,64 +555,125 @@ def _rectgrid_cluster_rows(items: list[tuple[float, float, str]], tol: float = 4
     return rows
 
 
-def extract_rectgrid_rows(pdf_path: Path, stats: ParseStats) -> list[ExtractedRow]:
+# One page as read from the PDF: (page_number, height, column grid, words),
+# where each word is (top, x0, x1, text). Plain tuples so pages can be handed
+# back cheaply from worker processes.
+RectgridPage = tuple[int, float, list[float], list[tuple[float, float, float, str]]]
+
+
+def _rectgrid_read_pages(pdf_path: str, first: int, last: int) -> list[RectgridPage]:
+    """Read words and the column grid for pages ``[first, last)`` (0-based)."""
+
+    pdfplumber = import_pdfplumber()
+    pages: list[RectgridPage] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for index in range(first, min(last, len(pdf.pages))):
+            page = pdf.pages[index]
+            grid = _rectgrid_page_grid(page)
+            words = [
+                (float(word["top"]), float(word["x0"]), float(word["x1"]), str(word["text"]))
+                for word in page.extract_words(use_text_flow=False, keep_blank_chars=False)
+            ]
+            pages.append((index + 1, float(getattr(page, "height", 0.0) or 0.0), grid, words))
+            page.close()  # release the parsed layout; a 424-page bank adds up
+    return pages
+
+
+def _rectgrid_load_pages(pdf_path: Path, jobs: int) -> list[RectgridPage]:
+    """Read every page, splitting the work across ``jobs`` processes.
+
+    Decoding the PDF is by far the slowest step and is independent per page, so
+    it parallelizes cleanly. Any failure to start workers (restricted
+    environments, frozen builds) falls back to a plain sequential read.
+    """
+
+    pdfplumber = import_pdfplumber()
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        page_count = len(pdf.pages)
+
+    jobs = max(1, min(jobs, page_count // 8 or 1))
+    if jobs == 1:
+        return _rectgrid_read_pages(str(pdf_path), 0, page_count)
+
+    chunk = -(-page_count // jobs)  # ceil division
+    ranges = [(start, min(start + chunk, page_count)) for start in range(0, page_count, chunk)]
+    try:
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
+            futures = [pool.submit(_rectgrid_read_pages, str(pdf_path), first, last) for first, last in ranges]
+            return [page for future in futures for page in future.result()]
+    except (OSError, RuntimeError):  # includes BrokenProcessPool
+        return _rectgrid_read_pages(str(pdf_path), 0, page_count)
+
+
+def extract_rectgrid_rows(pdf_path: Path, stats: ParseStats, jobs: int = 1) -> list[ExtractedRow]:
     """Primary extraction: word-level column assignment via the drawn rectangle
     grid, with rows reconstructed across page breaks on a continuous vertical
     coordinate. Anchors each row on the full question ID in the NUMER column.
     """
 
-    pdfplumber = import_pdfplumber()
-    tagged: list[tuple[float, float, int, str]] = []  # (global_top, x0, col, text)
+    tagged: list[tuple[float, float, int, str, int]] = []  # (global_top, x0, col, text, page)
     offset = 0.0
-    with pdfplumber.open(str(pdf_path)) as pdf:
-        stats.pages_scanned = max(stats.pages_scanned, len(pdf.pages))
-        for page in pdf.pages:
-            grid = _rectgrid_page_grid(page)
-            words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
-            # Drop the per-page repeated header row. A real header carries several
-            # labels on one line; require >=3 so a stray "Numer" inside an answer
-            # never deletes a data row.
-            header_tokens: dict[int, set[str]] = {}
-            for word in words:
-                norm = re.sub(r"[^a-z0-9]", "", word["text"].lower())
-                if norm in RECTGRID_HEADER_TOKENS:
-                    header_tokens.setdefault(round(word["top"]), set()).add(norm)
-            header_tops = {top for top, toks in header_tokens.items() if len(toks) >= 3}
-            for word in words:
-                if round(word["top"]) in header_tops:
-                    continue
-                center = (word["x0"] + word["x1"]) / 2
-                column = _rectgrid_column(center, grid)
-                if column >= 0:
-                    tagged.append((offset + float(word["top"]), float(word["x0"]), column, word["text"]))
-            offset += float(getattr(page, "height", 0.0) or 0.0) + RECTGRID_PAGE_GAP
+    pages = _rectgrid_load_pages(pdf_path, jobs)
+    stats.pages_scanned = max(stats.pages_scanned, len(pages))
+    for page_number, page_height, grid, words in pages:
+        # Independent completeness audit: look for question IDs in the raw
+        # visual lines of the page, ignoring the column grid entirely. Any ID
+        # seen here but not parsed below is reported as a gap.
+        visual_lines = _rectgrid_cluster_rows([(top, x0, text) for top, x0, _x1, text in words])
+        stats.text_lines_scanned += len(visual_lines)
+        for line in visual_lines:
+            line_text = " ".join(text for _, _, text in sorted(line, key=lambda item: item[1]))
+            stats.detected_ids.update(extract_question_ids(line_text, full_only=True))
+        # Drop the per-page repeated header row. A real header carries several
+        # labels on one line; require >=3 so a stray "Numer" inside an answer
+        # never deletes a data row.
+        header_tokens: dict[int, set[str]] = {}
+        for top, _x0, _x1, text in words:
+            norm = re.sub(r"[^a-z0-9]", "", text.lower())
+            if norm in RECTGRID_HEADER_TOKENS:
+                header_tokens.setdefault(round(top), set()).add(norm)
+        header_tops = {top for top, toks in header_tokens.items() if len(toks) >= 3}
+        for top, x0, x1, text in words:
+            if round(top) in header_tops:
+                continue
+            column = _rectgrid_column((x0 + x1) / 2, grid)
+            if column >= 0:
+                tagged.append((offset + top, x0, column, text, page_number))
+        offset += page_height + RECTGRID_PAGE_GAP
 
-    numer_items = [(t, x, txt) for (t, x, c, txt) in tagged if c == 1]
-    anchors: list[tuple[float, str]] = []
+    numer_items = [(t, x, txt) for (t, x, c, txt, _page) in tagged if c == 1]
+    page_by_top = {t: page for (t, _x, c, _txt, page) in tagged if c == 1}
+    anchors: list[tuple[float, str, int]] = []
     for row in _rectgrid_cluster_rows(numer_items):
         joined = "".join(txt for _, _, txt in sorted(row, key=lambda item: item[1]))
         ids = extract_question_ids(joined, full_only=True)
         if ids:
-            anchors.append((min(t for t, _, _ in row), ids[0]))
+            anchor_top = min(t for t, _, _ in row)
+            anchors.append((anchor_top, ids[0], page_by_top.get(anchor_top, 0)))
     anchors.sort()
 
     tagged.sort(key=lambda item: (item[0], item[1]))
     tops = [item[0] for item in tagged]
 
     rows: list[ExtractedRow] = []
-    for index, (anchor_top, question_id) in enumerate(anchors):
+    for index, (anchor_top, question_id, page_number) in enumerate(anchors):
         end = anchors[index + 1][0] if index + 1 < len(anchors) else float("inf")
         lo = bisect.bisect_left(tops, anchor_top - 3)
         hi = bisect.bisect_left(tops, end - 0.5) if end != float("inf") else len(tagged)
         columns: list[list[tuple[float, float, str]]] = [[] for _ in range(7)]
-        for (t, x, c, txt) in tagged[lo:hi]:
+        for (t, x, c, txt, _page) in tagged[lo:hi]:
             columns[c].append((t, x, txt))
-        cells = [
-            " ".join(txt for _, _, txt in sorted(col, key=lambda item: (round(item[0]), item[1]))).strip()
-            for col in columns
-        ]
+        cells: list[str] = []
+        for column_index, column_words in enumerate(columns):
+            # Rebuild the cell line by line so wrapped compound words
+            # ("lotniczo-" / "lekarskie") can be glued back together.
+            lines = [
+                " ".join(txt for _, _, txt in sorted(line, key=lambda item: item[1]))
+                for line in _rectgrid_cluster_rows(column_words)
+            ]
+            cells.append(join_cell_lines(lines) if column_index >= 2 else " ".join(lines).strip())
         stats.detected_ids.add(question_id)
-        rows.append(ExtractedRow(cells, 0, "rectgrid"))
+        rows.append(ExtractedRow(cells, page_number, "rectgrid"))
     return rows
 
 
@@ -924,31 +994,34 @@ def audit_sequential_index(stats: ParseStats, parsed_questions: Sequence[ParsedQ
         stats.issues.append(ParseIssue(0, "audit", "missing L.p. sequential indices after extraction"))
 
 
-def parse_pdf(pdf_path: Path) -> tuple[list[ParsedQuestion], ParseStats]:
+def parse_pdf(pdf_path: Path, jobs: int = 1) -> tuple[list[ParsedQuestion], ParseStats]:
     stats = ParseStats()
     # Primary pass: rectangle-grid word extraction. The table's drawn rectangles
     # give an exact, page-stable column grid, and rows are stitched across page
-    # breaks. This is the airtight source of truth for column separation.
-    rectgrid_rows = extract_rectgrid_rows(pdf_path, stats)
+    # breaks. The same pass also audits completeness by collecting every
+    # question ID visible on each page, independent of the grid.
+    rectgrid_rows = extract_rectgrid_rows(pdf_path, stats, jobs)
+    questions = merge_candidates(rectgrid_rows, stats)
 
-    # Independent ID detection (for the completeness audit) plus a cheap regex
-    # fallback for any ID the primary pass might miss. merge_candidates keeps the
-    # highest-priority record per ID, so rectgrid always wins where present.
-    text_pages = collect_pdf_text(pdf_path, stats)
-    regex_rows = extract_regex_rows(text_pages, stats)
-
-    # Heavy pdfminer/table rescue passes run only if the primary grid pass failed
-    # entirely (e.g. a future PDF without the drawn table rectangles).
-    rescue_rows: list[ExtractedRow] = []
-    if not rectgrid_rows:
+    # Rescue passes are slow (they re-read the whole PDF several times), so they
+    # run only when the primary pass left a gap: an ID that was seen on a page
+    # but not parsed, or a future PDF without the drawn table rectangles.
+    missing_ids = stats.detected_ids - {question.external_id for question in questions}
+    if missing_ids or not questions:
+        stats.used_rescue = True
+        text_pages = collect_pdf_text(pdf_path, stats)
         _, pdfminer_lines, page_width = extract_pdfminer_pages(pdf_path, stats)
         rescue_rows = [
+            *extract_regex_rows(text_pages, stats),
             *extract_pdfminer_geometry_rows(pdfminer_lines, page_width, stats),
             *extract_geometry_rows(pdf_path, stats),
             *extract_table_rows(pdf_path, stats),
         ]
+        # Start from a clean slate so per-method counters are not doubled.
+        stats.parsed_by_method.clear()
+        stats.duplicate_ids.clear()
+        questions = merge_candidates([*rectgrid_rows, *rescue_rows], stats)
 
-    questions = merge_candidates([*rectgrid_rows, *regex_rows, *rescue_rows], stats)
     audit_sequential_index(stats, questions)
     return questions, stats
 
@@ -964,6 +1037,7 @@ def print_validation_log(stats: ParseStats, parsed_questions: Sequence[ParsedQue
     print(f"  Total distinct full question IDs detected: {len(stats.detected_ids)}")
     print(f"  Total questions successfully parsed: {len(parsed_questions)}")
     print(f"  Parsed by method: {dict(sorted(stats.parsed_by_method.items()))}")
+    print(f"  Rescue passes needed: {'yes' if stats.used_rescue else 'no'}")
     print(f"  Duplicate IDs ignored: {sorted(stats.duplicate_ids) if stats.duplicate_ids else 'none'}")
     print(f"  Skipped/detected IDs not parsed: {missing_detected_ids if missing_detected_ids else 'none'}")
     print(f"  Missing sequential L.p. indices: {stats.sequential_gaps if stats.sequential_gaps else 'none'}")
@@ -988,13 +1062,21 @@ def main() -> int:
         action="store_true",
         help="Write output even when detected question IDs or sequential indices could not be reconstructed",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=min(8, os.cpu_count() or 1),
+        help="Worker processes used to read the PDF (default: CPU count, max 8; 1 disables parallelism)",
+    )
     args = parser.parse_args()
 
     if not args.input.exists():
         parser.error(f"Input PDF not found: {args.input}")
 
-    questions, stats = parse_pdf(args.input)
+    started = time.perf_counter()
+    questions, stats = parse_pdf(args.input, jobs=args.jobs)
     print_validation_log(stats, questions)
+    print(f"  Parse time: {time.perf_counter() - started:.1f}s")
     if not questions:
         raise SystemExit("No questions parsed. Check PDF extraction settings or source format.")
 
