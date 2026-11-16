@@ -21,8 +21,14 @@ up by pytest if that is available.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
+
+try:  # Run as a script (scripts/ on sys.path) or imported as a package module.
+    from question_text import normalize_text
+except ImportError:  # pragma: no cover - import style depends on the caller
+    from scripts.question_text import normalize_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 QUESTIONS_PATH = REPO_ROOT / "data" / "questions.json"
@@ -57,6 +63,47 @@ def load_questions() -> list[dict]:
     return data
 
 
+# Leftovers of the source export that the parser must have cleaned up.
+_DIRTY_TEXT_CHECKS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"&#?\w+;"), "unescaped HTML entity"),
+    (re.compile(r"<(?!/?su[bp]>)/?\s*su[bp][^>]{0,20}>"), "malformed sub/sup tag"),
+    (re.compile(r'""'), "CSV-doubled quote"),
+    (re.compile(r"\s{2,}|^\s|\s$"), "stray whitespace"),
+)
+
+
+def text_problems(text: str) -> list[str]:
+    """Return clean-up defects still present in a question/answer string."""
+
+    found = [label for pattern, label in _DIRTY_TEXT_CHECKS if pattern.search(text)]
+    if text.count("<sub>") != text.count("</sub>") or text.count("<sup>") != text.count("</sup>"):
+        found.append("unbalanced sub/sup tag")
+    if not found and normalize_text(text) != text:
+        found.append("text that is not normalized (re-run the parser)")
+    return found
+
+
+def find_warnings(questions: list[dict]) -> list[str]:
+    """Non-fatal oddities that exist in the official source itself.
+
+    These do not fail validation, but they are worth a human look because they
+    affect how a question reads in the app.
+    """
+
+    warnings: list[str] = []
+    for question in questions:
+        qid = question.get("external_id") or "<no-id>"
+        answers = question.get("answers") or []
+        texts = [str(answer.get("text") or "").strip() for answer in answers]
+        if len({text.casefold() for text in texts}) < len(texts):
+            warnings.append(f"{qid}: two answers have identical text")
+        for text in [str(question.get("question_text") or ""), *texts]:
+            if re.search(r"[^\s?]\?[^\s?:)\"”]", text):
+                warnings.append(f"{qid}: '?' inside a word (character lost in the source?): {text[:60]!r}")
+                break
+    return warnings
+
+
 def find_problems(questions: list[dict]) -> list[str]:
     """Return a list of human-readable integrity violations (empty == healthy)."""
 
@@ -77,9 +124,12 @@ def find_problems(questions: list[dict]) -> list[str]:
             problems.append(f"{qid}: duplicate external_id")
         seen_ids.add(qid)
 
-        # 3) Non-empty question text.
-        if not str(question.get("question_text") or "").strip():
+        # 3) Non-empty, clean question text.
+        question_text = str(question.get("question_text") or "")
+        if not question_text.strip():
             problems.append(f"{qid}: empty question_text")
+        for defect in text_problems(question_text):
+            problems.append(f"{qid}: question_text has {defect}")
 
         # 4) No UNKNOWN — every question must be categorized.
         category = question.get("category") or "UNKNOWN"
@@ -92,11 +142,13 @@ def find_problems(questions: list[dict]) -> list[str]:
             problems.append(f"{qid}: expected exactly 4 answers, got {len(answers) if isinstance(answers, list) else 'none'}")
             continue
 
-        # 5) Every answer has non-empty text.
+        # 5) Every answer has non-empty, clean text.
         texts = [str(answer.get("text") or "").strip() for answer in answers]
         for index, text in enumerate(texts):
             if not text:
                 problems.append(f"{qid}: answer {chr(ord('A') + index)} is empty")
+            for defect in text_problems(str(answers[index].get("text") or "")):
+                problems.append(f"{qid}: answer {chr(ord('A') + index)} has {defect}")
 
         # 6) Source invariant: key A is the correct answer and matches correct_answer.
         first = answers[0]
@@ -151,7 +203,15 @@ def main() -> int:
             print(f"  ... and {len(problems) - 50} more")
         return 1
 
-    print("\nPASSED — question bank is airtight (4 non-empty answers each, key A correct, 0 UNKNOWN).")
+    warnings = find_warnings(questions)
+    if warnings:
+        print(f"\n{len(warnings)} source oddity(ies) worth a manual look (not failures):")
+        for warning in warnings[:30]:
+            print(f"  ~ {warning}")
+        if len(warnings) > 30:
+            print(f"  ... and {len(warnings) - 30} more")
+
+    print("\nPASSED — question bank is airtight (4 non-empty clean answers each, key A correct, 0 UNKNOWN).")
     return 0
 
 
