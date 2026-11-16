@@ -8,27 +8,9 @@
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../api";
 import { useAuth } from "../auth";
-import { useI18n, type Lang } from "../i18n";
-
-function LanguageToggle() {
-  const { lang, setLang } = useI18n();
-  return (
-    <div className="flex gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 text-xs font-bold">
-      {(["pl", "en"] as Lang[]).map((code) => (
-        <button
-          key={code}
-          type="button"
-          onClick={() => setLang(code)}
-          className={`rounded-xl px-3 py-1.5 uppercase transition ${
-            lang === code ? "bg-cyan-300 text-slate-950" : "text-slate-400 hover:text-white"
-          }`}
-        >
-          {code}
-        </button>
-      ))}
-    </div>
-  );
-}
+import { useI18n } from "../i18n";
+import LanguageToggle from "./LanguageToggle";
+import { Icon, useSlow } from "./ui";
 
 export default function AuthScreen() {
   const { t } = useI18n();
@@ -39,6 +21,8 @@ export default function AuthScreen() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const slow = useSlow(submitting);
 
   const isRegister = mode === "register";
 
@@ -65,11 +49,14 @@ export default function AuthScreen() {
       }
       // On success the AuthProvider sets the user and App swaps to the dashboard.
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.detail || t("auth.errorGeneric"));
-      } else {
-        setError(t("auth.errorGeneric"));
-      }
+      // Translate the API's outcome instead of echoing its English detail.
+      const status = err instanceof ApiError ? err.status : 0;
+      if (status === 401) setError(t("auth.errorInvalid"));
+      else if (status === 409) setError(t("auth.errorEmailTaken"));
+      else if (status === 429) setError(t("auth.errorTooMany"));
+      else if (status === 422) setError(t("auth.errorEmailInvalid"));
+      else if (status === 0) setError(t("auth.errorOffline"));
+      else setError(t("auth.errorGeneric"));
     } finally {
       setSubmitting(false);
     }
@@ -81,11 +68,11 @@ export default function AuthScreen() {
   };
 
   return (
-    <div className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.1),_transparent_45%)] px-4 py-10">
-      <div className="w-full max-w-md">
+    <div className="grid min-h-screen place-items-center px-4 py-10">
+      <div className="animate-rise w-full max-w-md">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/pilotready-logo.png" alt="PilotReady" className="h-11 w-11 rounded-2xl object-contain" />
+            <img src="/pilotready-logo.png" alt="" width={44} height={44} className="h-11 w-11 rounded-2xl" />
             <div>
               <span className="block text-lg font-bold text-white">PilotReady</span>
               <span className="block text-xs uppercase tracking-[0.3em] text-cyan-300">{t("app.tagline")}</span>
@@ -94,7 +81,7 @@ export default function AuthScreen() {
           <LanguageToggle />
         </div>
 
-        <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-8 shadow-2xl shadow-cyan-950/30">
+        <div className="card p-6 sm:p-8">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">{t("auth.welcome")}</p>
           <h1 className="mt-2 text-2xl font-bold text-white">{isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}</h1>
           <p className="mt-1 text-sm text-slate-400">{isRegister ? t("auth.registerSubtitle") : t("auth.loginSubtitle")}</p>
@@ -129,26 +116,40 @@ export default function AuthScreen() {
 
             <label className="grid gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{t("auth.password")}</span>
-              <input
-                type="password"
-                autoComplete={isRegister ? "new-password" : "current-password"}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300/70 focus:bg-white/10"
-                placeholder="••••••••"
-              />
+              <span className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 pl-4 pr-20 text-white outline-none transition focus:border-cyan-300/70 focus:bg-white/10"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-2 my-auto h-8 rounded-lg px-2.5 text-xs font-semibold text-slate-400 hover:text-white"
+                >
+                  {showPassword ? t("auth.hide") : t("auth.show")}
+                </button>
+              </span>
               {isRegister && <span className="text-xs text-slate-500">{t("auth.passwordHint")}</span>}
             </label>
 
             {error && (
-              <p className="rounded-2xl border border-red-900/70 bg-red-950/40 px-4 py-3 text-sm text-red-100">{error}</p>
+              <p role="alert" className="flex items-start gap-2.5 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                <Icon name="alert" className="mt-0.5 h-4 w-4 text-red-300" />
+                {error}
+              </p>
             )}
+            {slow && <p className="animate-rise text-xs leading-relaxed text-slate-500">{t("app.coldStart")}</p>}
 
             <button
               type="submit"
               disabled={submitting}
-              className="mt-2 rounded-2xl bg-cyan-300 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/40 transition hover:bg-cyan-200 disabled:opacity-50"
+              className="btn btn-primary mt-2"
             >
               {submitting ? t("auth.submitting") : isRegister ? t("auth.registerCta") : t("auth.loginCta")}
             </button>

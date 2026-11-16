@@ -30,6 +30,8 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
+  // Unsent answers belong to the account that is being signed out.
+  window.localStorage.removeItem(OUTBOX_KEY);
 }
 
 export class ApiError extends Error {
@@ -55,12 +57,71 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
 
-  if (response.status === 401) {
+  // A 401 on a request that carried a token means the session is no longer
+  // valid. Without a token it is just a failed login, which the caller reports.
+  if (response.status === 401 && token) {
     clearToken();
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
-    throw new ApiError(401, "Sesja wygasła — zaloguj się ponownie.");
+    throw new ApiError(401, "session_expired");
   }
   return response;
+}
+
+// --- Study progress with an offline outbox ------------------------------------
+// Every answer is queued in localStorage first and only removed once the server
+// has accepted it. A dropped connection or a sleeping backend therefore never
+// loses progress: the queue is retried on the next answer and on app start.
+const OUTBOX_KEY = "pilotready:progress-outbox";
+const OUTBOX_LIMIT = 500;
+
+type PendingAnswer = { question_id: string; selected_text: string; status: "CORRECT" | "INCORRECT" };
+
+function readOutbox(): PendingAnswer[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(OUTBOX_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOutbox(queue: PendingAnswer[]): void {
+  try {
+    if (queue.length) window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue.slice(-OUTBOX_LIMIT)));
+    else window.localStorage.removeItem(OUTBOX_KEY);
+  } catch {
+    /* storage full or unavailable - progress falls back to best-effort */
+  }
+}
+
+let flushing = false;
+
+/** Send queued answers in order; stops at the first one the server cannot take yet. */
+export async function flushProgressOutbox(): Promise<void> {
+  if (flushing || !getToken()) return;
+  flushing = true;
+  try {
+    for (let queue = readOutbox(); queue.length > 0; queue = readOutbox()) {
+      const response = await apiFetch("/api/progress", { method: "POST", body: JSON.stringify(queue[0]) });
+      // Server trouble or throttling: keep the answer and try again later.
+      if (response.status >= 500 || response.status === 429) return;
+      // Accepted - or rejected for good (e.g. the question no longer exists).
+      writeOutbox(readOutbox().slice(1));
+    }
+  } catch {
+    /* offline, or the session expired (which already cleared the queue) */
+  } finally {
+    flushing = false;
+  }
+}
+
+/** Record a study answer. Returns immediately; delivery is handled by the outbox. */
+export function saveProgress(questionId: string, selectedText: string, isCorrect: boolean): void {
+  writeOutbox([
+    ...readOutbox(),
+    { question_id: questionId, selected_text: selectedText, status: isCorrect ? "CORRECT" : "INCORRECT" },
+  ]);
+  void flushProgressOutbox();
 }
 
 // --- Anonymous visit tracking -------------------------------------------------
